@@ -1,26 +1,27 @@
 import Link from "next/link";
-import { BookCard } from "@/components/book-card";
-import { ContinueReadingCard } from "@/components/continue-reading-card";
-import { books, getContinueReadingBook } from "@/lib/mock-data";
 
 const features = [
   {
-    title: "Spoiler-safe answers",
-    body: "Ask about characters, plot and lore. The assistant only knows what you've already read.",
+    title: "Spoiler-proof by design",
+    body: "Ask about characters, plot and lore. Search only ever sees chapters you've finished — the limit is enforced in the database, not the UI.",
   },
   {
-    title: "Pick up where you left off",
-    body: "Your last-read chapter is tracked across every volume, so long series never lose you.",
+    title: "Resume exactly where you stopped",
+    body: "Recall remembers your chapter and scroll position, plus bookmarks, across devices.",
   },
   {
     title: "Built for huge series",
-    body: "Volumes, arcs and hundreds of chapters organised in one clean library.",
+    body: "Volumes, hundreds of chapters, and passage-level search instead of re-reading everything after a long break.",
   },
 ];
 
-export default function Home() {
-  const current = getContinueReadingBook();
+const steps = [
+  ["Add a novel", "Paste a Ranobelib link for its details, or enter it yourself."],
+  ["Read & track", "Add chapter text, read in a clean reader, and let progress track itself."],
+  ["Ask without spoilers", "Come back months later and ask what you've forgotten."],
+];
 
+export default function Home() {
   return (
     <>
       <section className="relative overflow-hidden border-b border-border">
@@ -32,34 +33,31 @@ export default function Home() {
           }}
           aria-hidden
         />
-        <div className="mx-auto grid max-w-6xl gap-10 px-4 py-14 sm:px-6 sm:py-20 lg:grid-cols-2 lg:items-center">
-          <div>
-            <p className="inline-block rounded-full bg-accent-soft px-3 py-1 text-xs font-medium text-accent">
-              AI reading companion · frontend preview
-            </p>
-            <h1 className="mt-5 text-balance text-4xl font-bold tracking-tight sm:text-5xl">
-              Never lose the plot of a long series again.
-            </h1>
-            <p className="mt-5 max-w-xl text-lg leading-relaxed text-muted">
-              Lorekeeper tracks your progress through light novels and book series, and lets you
-              ask questions about the story without spoilers.
-            </p>
-            <div className="mt-8 flex flex-wrap gap-3">
-              <Link
-                href="/library"
-                className="rounded-full bg-accent px-6 py-3 text-sm font-medium text-accent-foreground transition hover:opacity-90"
-              >
-                Browse the library
-              </Link>
-              <Link
-                href={`/library/${current.slug}#assistant`}
-                className="rounded-full border border-border px-6 py-3 text-sm font-medium transition hover:bg-accent-soft"
-              >
-                Try the assistant
-              </Link>
-            </div>
+        <div className="mx-auto max-w-4xl px-4 py-20 text-center sm:px-6 sm:py-28">
+          <p className="inline-block rounded-full bg-accent-soft px-3 py-1 text-xs font-medium text-accent">
+            For light novels & long series
+          </p>
+          <h1 className="mt-5 text-balance text-4xl font-bold tracking-tight sm:text-6xl">
+            Come back after months. Remember everything. Spoil nothing.
+          </h1>
+          <p className="mx-auto mt-6 max-w-2xl text-lg leading-relaxed text-muted">
+            Recall tracks your place in long stories and answers questions about what you&apos;ve
+            already read — never a chapter further.
+          </p>
+          <div className="mt-8 flex flex-wrap justify-center gap-3">
+            <Link
+              href="/signup"
+              className="rounded-full bg-accent px-6 py-3 text-sm font-medium text-accent-foreground transition hover:opacity-90"
+            >
+              Get started
+            </Link>
+            <Link
+              href="/library"
+              className="rounded-full border border-border px-6 py-3 text-sm font-medium transition hover:bg-accent-soft"
+            >
+              Open my library
+            </Link>
           </div>
-          <ContinueReadingCard book={current} />
         </div>
       </section>
 
@@ -75,17 +73,20 @@ export default function Home() {
       </section>
 
       <section className="mx-auto max-w-6xl px-4 pb-20 sm:px-6">
-        <div className="mb-6 flex items-end justify-between">
-          <h2 className="text-2xl font-bold tracking-tight">From your library</h2>
-          <Link href="/library" className="text-sm font-medium text-accent hover:underline">
-            View all
-          </Link>
-        </div>
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
-          {books.slice(0, 4).map((b) => (
-            <BookCard key={b.slug} book={b} />
+        <h2 className="text-2xl font-bold tracking-tight">How it works</h2>
+        <ol className="mt-6 grid gap-4 sm:grid-cols-3">
+          {steps.map(([title, body], i) => (
+            <li key={title} className="flex gap-4 rounded-2xl border border-border p-5">
+              <span className="grid size-8 shrink-0 place-items-center rounded-full bg-accent text-sm font-semibold text-accent-foreground">
+                {i + 1}
+              </span>
+              <div>
+                <h3 className="font-semibold">{title}</h3>
+                <p className="mt-1 text-sm text-muted">{body}</p>
+              </div>
+            </li>
           ))}
-        </div>
+        </ol>
       </section>
     </>
   );

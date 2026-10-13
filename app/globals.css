@@ -9,10 +9,13 @@
   --accent: #5b4bdb;
   --accent-soft: #ede9fe;
   --accent-foreground: #ffffff;
+  --danger: #dc2626;
+  color-scheme: light;
 }
 
+/* Dark follows the OS unless the user picked a theme explicitly. */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --background: #0c0a09;
     --foreground: #f5f5f4;
     --surface: #171412;
@@ -21,7 +24,22 @@
     --accent: #8b7cf6;
     --accent-soft: #272046;
     --accent-foreground: #0c0a09;
+    --danger: #f87171;
+    color-scheme: dark;
   }
+}
+
+:root[data-theme="dark"] {
+  --background: #0c0a09;
+  --foreground: #f5f5f4;
+  --surface: #171412;
+  --muted: #a8a29e;
+  --border: #292524;
+  --accent: #8b7cf6;
+  --accent-soft: #272046;
+  --accent-foreground: #0c0a09;
+  --danger: #f87171;
+  color-scheme: dark;
 }
 
 @theme inline {
@@ -33,6 +51,7 @@
   --color-accent: var(--accent);
   --color-accent-soft: var(--accent-soft);
   --color-accent-foreground: var(--accent-foreground);
+  --color-danger: var(--danger);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
@@ -41,4 +60,23 @@ body {
   background: var(--background);
   color: var(--foreground);
   font-family: var(--font-geist-sans), system-ui, sans-serif;
+}
+
+@keyframes shimmer {
+  to {
+    background-position: -200% 0;
+  }
+}
+
+.skeleton {
+  background: linear-gradient(90deg, var(--border) 25%, var(--accent-soft) 50%, var(--border) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.6s linear infinite;
+  border-radius: 0.75rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton {
+    animation: none;
+  }
 }
