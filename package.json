@@ -10,9 +10,11 @@
     "test": "vitest run",
     "postinstall": "node scripts/copy-pdf-worker.mjs",
     "predev": "node scripts/copy-pdf-worker.mjs",
-    "prebuild": "node scripts/copy-pdf-worker.mjs"
+    "prebuild": "node scripts/copy-pdf-worker.mjs",
+    "smoke:gemini": "node scripts/gemini-smoke.mjs"
   },
   "dependencies": {
+    "@google/genai": "^2.29.1",
     "@supabase/ssr": "^0.12.7",
     "@supabase/supabase-js": "^2.117.3",
     "cheerio": "^1.2.0",

@@ -44,6 +44,7 @@ export async function bootDb() {
   await db.exec(migration("0002_volumes_images_featured.sql"));
   await db.exec(migration("0003_storage_book_images.sql"));
   await db.exec(migration("0004_volume_covers.sql"));
+  await db.exec(migration("0005_assistant_context.sql"));
 
   await db.exec(`
     grant usage on schema public to anon, authenticated;

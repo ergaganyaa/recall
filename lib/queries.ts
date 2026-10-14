@@ -161,7 +161,7 @@ export async function getChat(bookId: string): Promise<ChatMessage[]> {
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("chat_messages")
-    .select("id,role,content,boundary_chapter,created_at")
+    .select("id,role,content,boundary_chapter,created_at,sources")
     .eq("book_id", bookId)
     .order("created_at")
     .limit(100);

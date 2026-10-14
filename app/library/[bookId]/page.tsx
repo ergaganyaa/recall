@@ -13,6 +13,7 @@ import { ChapterList } from "@/components/chapter-list";
 import { ProgressBar } from "@/components/progress-bar";
 import { SetupNotice } from "@/components/setup-notice";
 import { BookSkeleton } from "@/components/skeletons";
+import { readAssistantConfig } from "@/lib/assistant/config";
 import { requireUser } from "@/lib/auth";
 import { resolveCover } from "@/lib/cover";
 import { summarizeProgress } from "@/lib/progress-display";
@@ -45,6 +46,8 @@ async function BookContent({ params }: { params: PageProps<"/library/[bookId]">[
 
   const total = chapters.length;
   const lastRead = Math.min(progress.last_read_chapter, total);
+  // Only whether a key exists and the model name are passed to the browser; the key itself never is.
+  const assistant = readAssistantConfig();
   const cover = resolveCover(book, volumes);
   const summary = summarizeProgress({ chapters, lastRead, status: book.status });
   const percent = summary.percent;
@@ -150,6 +153,8 @@ async function BookContent({ params }: { params: PageProps<"/library/[bookId]">[
             initialMessages={messages}
             boundary={lastRead}
             suggestions={book.is_sample ? SAMPLE_SUGGESTIONS : []}
+            configured={assistant.apiKey !== null}
+            modelLabel={assistant.model}
           />
           <ChapterTools bookId={book.id} chapters={chapters} />
           <BookmarksList bookId={book.id} bookmarks={bookmarks} />

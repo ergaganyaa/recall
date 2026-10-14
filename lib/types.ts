@@ -81,6 +81,8 @@ export type ChatMessage = {
   content: string;
   boundary_chapter: number | null;
   created_at: string;
+  /** Chapters an assistant answer drew on (null for questions and older messages) */
+  sources: import("./assistant/types").Citation[] | null;
 };
 
 export type Passage = {
@@ -94,4 +96,4 @@ export type Passage = {
 /** Result shape for server actions called from client components. */
 export type ActionResult<T = undefined> =
   | { ok: true; data: T }
-  | { ok: false; error: string };
+  | { ok: false; error: string; /** machine-readable reason for the UI, e.g. "missing_key" */ code?: string };
