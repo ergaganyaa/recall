@@ -53,7 +53,7 @@ export async function listLibrary(): Promise<LibraryItem[]> {
   const { data, error } = await supabase
     .from("books")
     .select(
-      `${BOOK_COLS}, chapters(word_count,image_count), volumes(imported_at,cover_image_id), reading_progress(last_read_chapter,current_chapter,scroll_pct)`,
+      `${BOOK_COLS}, chapters(word_count,image_count), volumes(imported_at,cover_image_id), reading_progress(last_read_chapter,current_chapter,scroll_pct,partial_read_block,partial_rev,resume_block)`,
     )
     .order("is_featured", { ascending: false })
     .order("created_at", { ascending: false })
@@ -105,7 +105,7 @@ export async function getBookStructure(bookId: string) {
     supabase.from("chapters").select(CHAPTER_COLS).eq("book_id", bookId).order("number"),
     supabase
       .from("reading_progress")
-      .select("last_read_chapter,current_chapter,scroll_pct")
+      .select("last_read_chapter,current_chapter,scroll_pct,partial_read_block,partial_rev,resume_block")
       .eq("book_id", bookId)
       .maybeSingle<Progress>(),
     supabase
@@ -122,7 +122,7 @@ export async function getBookStructure(bookId: string) {
   return {
     volumes: sortVolumes((volumes.data ?? []) as Volume[]),
     chapters: ((chapters.data ?? []) as ChapterRow[]).map(withContentFlag),
-    progress: progress.data ?? { last_read_chapter: 0, current_chapter: 1, scroll_pct: 0 },
+    progress: progress.data ?? { last_read_chapter: 0, current_chapter: 1, scroll_pct: 0, partial_read_block: -1, partial_rev: 0, resume_block: null },
     bookmarks: (bookmarks.data ?? []) as Bookmark[],
   };
 }
@@ -136,7 +136,7 @@ export async function getChapter(
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("chapters")
-    .select(`${CHAPTER_COLS},content`)
+    .select(`${CHAPTER_COLS},content,content_rev`)
     .eq("book_id", bookId)
     .eq("number", number)
     .maybeSingle();
@@ -153,6 +153,7 @@ export async function getChapter(
   return {
     ...withContentFlag(data as ChapterRow),
     content: (data as { content: string | null }).content,
+    content_rev: (data as { content_rev: number }).content_rev ?? 0,
     images: Object.fromEntries((imgs ?? []).map((i) => [i.id as string, i as ChapterImage])),
   };
 }
@@ -161,7 +162,7 @@ export async function getChat(bookId: string): Promise<ChatMessage[]> {
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("chat_messages")
-    .select("id,role,content,boundary_chapter,created_at,sources")
+    .select("id,role,content,boundary_chapter,boundary_block,created_at,sources")
     .eq("book_id", bookId)
     .order("created_at")
     .limit(100);

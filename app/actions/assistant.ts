@@ -11,10 +11,11 @@ import { isUuid } from "@/lib/queries";
 import { createClient } from "@/lib/supabase/server";
 import type { ActionResult, ChatMessage } from "@/lib/types";
 
-const MSG_COLS = "id,role,content,boundary_chapter,created_at,sources";
+const MSG_COLS = "id,role,content,boundary_chapter,boundary_block,created_at,sources";
 
 const contextShape = z.object({
   boundary: z.number().int().nullable(),
+  partial_block: z.number().int(),
   passages: z.array(
     z.object({
       chunk_id: z.string(),
@@ -26,6 +27,8 @@ const contextShape = z.object({
       arc: z.string().nullable(),
       content: z.string(),
       rank: z.number(),
+      block_first: z.number().int().nullable(),
+      block_last: z.number().int().nullable(),
     }),
   ),
 });
@@ -65,7 +68,7 @@ export async function askAssistant(bookId: string, question: string): Promise<Ac
   // Recent conversation (RLS: only this user's messages). Filtered against the boundary inside answerQuestion.
   const { data: recent } = await supabase
     .from("chat_messages")
-    .select("role,content,boundary_chapter")
+    .select("role,content,boundary_chapter,boundary_block")
     .eq("book_id", book)
     .order("created_at", { ascending: false })
     .limit(20);
@@ -96,7 +99,7 @@ export async function askAssistant(bookId: string, question: string): Promise<Ac
           failure = "Couldn't search the book. Please try again.";
           throw new Error("unexpected retrieval result");
         }
-        return { boundary: shaped.data.boundary, passages: shaped.data.passages as SourcePassage[] };
+        return { boundary: shaped.data.boundary, partial_block: shaped.data.partial_block, passages: shaped.data.passages as SourcePassage[] };
       },
       hasReadableText: async (boundary) => {
         const { count } = await supabase
@@ -125,12 +128,20 @@ export async function askAssistant(bookId: string, question: string): Promise<Ac
   const { data: saved, error: saveErr } = await supabase
     .from("chat_messages")
     .insert([
-      { book_id: book, role: "user", content: q, boundary_chapter: outcome.boundary, created_at: new Date(t0).toISOString() },
+      {
+        book_id: book,
+        role: "user",
+        content: q,
+        boundary_chapter: outcome.boundary,
+        boundary_block: outcome.partialBlock,
+        created_at: new Date(t0).toISOString(),
+      },
       {
         book_id: book,
         role: "assistant",
         content: outcome.text,
         boundary_chapter: outcome.boundary,
+        boundary_block: outcome.partialBlock,
         sources: outcome.citations.length ? outcome.citations : null,
         created_at: new Date(t0 + 1).toISOString(),
       },

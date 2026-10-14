@@ -75,7 +75,7 @@ describe("assistant_context (the database boundary)", () => {
     await t.as(ALICE);
     await setBoundary(3);
     const r = await dbContext()(["zxbetrayal", "zxfinale", "guild", "silver", "betrayal"]);
-    expect(r).toEqual({ boundary: 3, passages: [] });
+    expect(r).toMatchObject({ boundary: 3, passages: [], partial_block: -1 });
   });
 
   it("takes no boundary argument, so a caller cannot raise it", async () => {
@@ -90,7 +90,7 @@ describe("assistant_context (the database boundary)", () => {
     await setBoundary(3);
     expect((await dbContext()(["odell", "guild"])).passages.every((p) => p.chapter_number <= 3)).toBe(true);
     await setBoundary(0);
-    expect(await dbContext()(["mira", "gear"])).toEqual({ boundary: 0, passages: [] });
+    expect(await dbContext()(["mira", "gear"])).toMatchObject({ boundary: 0, passages: [], partial_block: -1 });
   });
 
   it("reports a decimal volume exactly (volume 4.5)", async () => {
@@ -104,7 +104,7 @@ describe("assistant_context (the database boundary)", () => {
     await t.as(ALICE);
     await setBoundary(6);
     await t.as(BOB);
-    expect(await dbContext()(["mira", "gear"])).toEqual({ boundary: null, passages: [] });
+    expect(await dbContext()(["mira", "gear"])).toMatchObject({ boundary: null, passages: [], partial_block: -1 });
     await t.as(ALICE);
     expect((await dbContext("99999999-9999-4999-8999-999999999999")(["mira"])).boundary).toBeNull();
   });
@@ -144,7 +144,7 @@ describe("1. a question answered correctly from retrieved passages", () => {
     expect(out.boundary).toBe(3);
     const cited = out.citations.filter((c) => c.cited);
     expect(cited).toHaveLength(1);
-    expect(cited[0]).toMatchObject({ chapter: 3, label: "Vol. 1 · Ch. 3 — The Warning", href: `/library/${book}/read/3` });
+    expect(cited[0]).toMatchObject({ chapter: 3, label: "Vol. 1 · Ch. 3 — The Warning", href: `/library/${book}/read/3?cite=1` });
     const sent = everythingSent(provider);
     expect(sent).toContain("Tamsin the gear cutter warned Mira"); // the supporting passage was sent
     expect(provider.calls).toHaveLength(1);
@@ -287,7 +287,7 @@ describe("8. citations match what was retrieved", () => {
     if (out.kind !== "answer") return;
     expect(out.text).not.toContain("[8]");
     for (const c of out.citations) expect(c.chapter).toBeLessThanOrEqual(3);
-    expect(out.citations.some((c) => c.href.endsWith("/read/5"))).toBe(false);
+    expect(out.citations.some((c) => c.href.includes("/read/5"))).toBe(false);
   });
 });
 

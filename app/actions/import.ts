@@ -183,6 +183,7 @@ export async function saveImportedChapter(
     await storeChapterBody(supabase, { id: chapter.id, book_id: bookId, number: chapter.number }, {
       content: body.content,
       chunks: body.chunks,
+      chunkRanges: body.chunkRanges,
       wordCount: body.wordCount,
       imageCount: body.imageIds.length,
     });

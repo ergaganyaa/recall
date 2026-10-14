@@ -1,28 +1,74 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition, type ReactNode } from "react";
 import { askAssistant, clearChat } from "@/app/actions/assistant";
 import type { Citation } from "@/lib/assistant/types";
 import type { ChatMessage } from "@/lib/types";
 
+/** Where the reader is, shown at the top of the in-reader chat so follow-up questions need no repeated context. */
+export type ChatContext = {
+  book: string;
+  volume: string | null;
+  chapter: number;
+  chapterTitle: string;
+  /** e.g. "chapters 1–4 and up to ¶ 12 of chapter 5" */
+  readTo: string;
+};
+
+const chip =
+  "inline-flex max-w-full items-center gap-1.5 rounded-full border border-border bg-background px-2.5 py-1 text-xs text-foreground transition hover:border-accent hover:text-accent focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-accent";
+
 /** Sources under an answer: the chapters it cites first, then any others that were only consulted. */
-function Sources({ sources }: { sources: Citation[] }) {
+function Sources({
+  sources,
+  currentChapter,
+  onJump,
+}: {
+  sources: Citation[];
+  currentChapter?: number;
+  onJump?: (c: Citation) => boolean;
+}) {
+  if (sources.length === 0) return null;
   const cited = sources.filter((s) => s.cited);
   const others = sources.filter((s) => !s.cited);
-  if (sources.length === 0) return null;
-  const chip = "inline-flex max-w-full items-center gap-1.5 rounded-full border border-border bg-background px-2.5 py-1 text-xs text-foreground transition hover:border-accent hover:text-accent focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-accent";
+
+  const link = (s: Citation, children: ReactNode, title?: string) => {
+    const sameChapter = currentChapter !== undefined && s.chapter === currentChapter && s.block !== null;
+    return (
+      <Link
+        key={s.chapter}
+        href={s.href}
+        title={title}
+        className={chip}
+        data-testid="citation"
+        data-block={s.block ?? undefined}
+        onClick={(e) => {
+          // A passage in the chapter you are reading: scroll there in place, without leaving or losing your place.
+          if (sameChapter && onJump?.(s)) e.preventDefault();
+        }}
+      >
+        {children}
+      </Link>
+    );
+  };
+
   return (
     <div className="mt-2 space-y-1.5" data-testid="sources">
       {cited.length > 0 && (
         <div className="flex flex-wrap items-center gap-1.5">
           <span className="text-[0.7rem] font-medium uppercase tracking-wide text-muted">Sources</span>
-          {cited.map((s) => (
-            <Link key={s.chapter} href={s.href} className={chip} title="Open this chapter">
-              <span className="font-semibold text-accent">[{s.indices.join(", ")}]</span>
-              <span className="truncate">{s.label}</span>
-            </Link>
-          ))}
+          {cited.map((s) =>
+            link(
+              s,
+              <>
+                <span className="font-semibold text-accent">[{s.indices.join(", ")}]</span>
+                <span className="truncate">{s.label}</span>
+                {s.block !== null && <span aria-hidden className="text-muted">↗</span>}
+              </>,
+              s.block !== null ? "Jump to this passage" : "Open this chapter",
+            ),
+          )}
         </div>
       )}
       {others.length > 0 && (
@@ -30,13 +76,7 @@ function Sources({ sources }: { sources: Citation[] }) {
           <summary className="cursor-pointer select-none hover:text-foreground">
             {cited.length > 0 ? "Also looked at" : "Passages consulted"} ({others.length})
           </summary>
-          <div className="mt-1.5 flex flex-wrap gap-1.5">
-            {others.map((s) => (
-              <Link key={s.chapter} href={s.href} className={chip}>
-                <span className="truncate">{s.label}</span>
-              </Link>
-            ))}
-          </div>
+          <div className="mt-1.5 flex flex-wrap gap-1.5">{others.map((s) => link(s, <span className="truncate">{s.label}</span>))}</div>
         </details>
       )}
     </div>
@@ -50,6 +90,13 @@ export function AssistantChat({
   suggestions = [],
   configured,
   modelLabel,
+  variant = "card",
+  context,
+  currentChapter,
+  onJump,
+  beforeAsk,
+  headerAction,
+  onClose,
 }: {
   suggestions?: string[];
   bookId: string;
@@ -59,6 +106,17 @@ export function AssistantChat({
   /** Whether the server has an API key. A boolean only: the key itself never reaches the browser. */
   configured: boolean;
   modelLabel: string;
+  /** "card" on the book page; "panel" fills its container inside the reader */
+  variant?: "card" | "panel";
+  context?: ChatContext;
+  /** The chapter open in the reader: citations into it jump in place */
+  currentChapter?: number;
+  /** Handle a citation click in place; return true if handled */
+  onJump?: (c: Citation) => boolean;
+  /** Awaited before each question: lets the reader save its latest position first */
+  beforeAsk?: () => Promise<void>;
+  headerAction?: ReactNode;
+  onClose?: () => void;
 }) {
   const [messages, setMessages] = useState<ChatMessage[]>(initialMessages);
   const [input, setInput] = useState("");
@@ -77,6 +135,14 @@ export function AssistantChat({
     setInput("");
     startTransition(async () => {
       try {
+        try {
+          await beforeAsk?.();
+        } catch (e) {
+          // The reader could not save your position, so the question is not sent (an older, further position must never be used).
+          setError({ text: e instanceof Error ? e.message : "Couldn't save your reading position.", code: "position" });
+          setInput(q);
+          return;
+        }
         const res = await askAssistant(bookId, q);
         if (res.ok) setMessages((m) => [...m, ...res.data]);
         else {
@@ -99,33 +165,66 @@ export function AssistantChat({
     });
   }
 
-  const blocked = !configured || boundary === 0;
+  const blocked = !configured || (boundary === 0 && !context);
+  const panel = variant === "panel";
 
   return (
     <section
-      id="assistant"
+      id={panel ? undefined : "assistant"}
       aria-label="Spoiler-aware assistant"
-      className="flex h-[36rem] scroll-mt-24 flex-col overflow-hidden rounded-2xl border border-border bg-surface"
+      data-testid="assistant-chat"
+      className={
+        panel
+          ? "flex h-full min-h-0 flex-col bg-surface text-foreground"
+          : "flex h-[36rem] scroll-mt-24 flex-col overflow-hidden rounded-2xl border border-border bg-surface"
+      }
     >
       <header className="border-b border-border px-4 py-3">
         <div className="flex items-center justify-between gap-2">
           <h2 className="font-semibold">Ask about the story</h2>
-          {messages.length > 0 && (
-            <button type="button" onClick={clear} className="text-xs text-muted hover:text-danger">
-              Clear
-            </button>
-          )}
+          <div className="flex items-center gap-3">
+            {messages.length > 0 && (
+              <button type="button" onClick={clear} className="text-xs text-muted hover:text-danger">
+                Clear
+              </button>
+            )}
+            {onClose && (
+              <button
+                type="button"
+                onClick={onClose}
+                aria-label="Close chat"
+                data-testid="close-chat"
+                className="grid size-8 place-items-center rounded-full border border-border text-muted hover:text-foreground focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-accent"
+              >
+                ✕
+              </button>
+            )}
+          </div>
         </div>
-        <p className="mt-1 text-xs text-muted">
-          {boundary > 0 ? (
-            <>
-              Answers use chapters <strong className="text-foreground">1–{boundary}</strong> only. Nothing later is ever
-              sent to the AI.
-            </>
-          ) : (
-            "Finish a chapter to unlock questions."
-          )}
-        </p>
+
+        {context ? (
+          <div className="mt-2 rounded-xl bg-accent-soft px-3 py-2 text-xs" data-testid="chat-context">
+            <p className="truncate font-medium text-foreground">{context.book}</p>
+            <p className="truncate text-muted">
+              {context.volume ? `${context.volume} · ` : ""}Ch. {context.chapter} — {context.chapterTitle}
+            </p>
+            <p className="mt-1 text-muted">
+              The assistant only uses <strong className="text-foreground">{context.readTo}</strong>. Nothing later is ever sent.
+            </p>
+          </div>
+        ) : (
+          <p className="mt-1 text-xs text-muted">
+            {boundary > 0 ? (
+              <>
+                Answers use chapters <strong className="text-foreground">1–{boundary}</strong> only. Nothing later is ever
+                sent to the AI.
+              </>
+            ) : (
+              "Finish a chapter to unlock questions."
+            )}
+          </p>
+        )}
+        {headerAction}
         <p className="mt-2 text-[0.7rem] leading-snug text-muted">
           <span className="mr-1.5 inline-block rounded-full bg-accent-soft px-2 py-0.5 font-medium text-accent">AI · {modelLabel}</span>
           Your question and a few short passages you&apos;ve read are sent to Google Gemini. On the free tier, Google may use
@@ -146,11 +245,11 @@ export function AssistantChat({
         </div>
       )}
 
-      <div ref={scroller} className="flex-1 space-y-3 overflow-y-auto px-4 py-4" aria-live="polite">
+      <div ref={scroller} className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain px-4 py-4" aria-live="polite">
         {messages.length === 0 && !pending && configured && (
           <p className="pt-8 text-center text-sm text-muted">
             Ask about characters, relationships or events. Answers are based on passages you&apos;ve already read, with links
-            to the chapters they came from.
+            to the paragraphs they came from.
           </p>
         )}
         {messages.map((m) => (
@@ -163,14 +262,14 @@ export function AssistantChat({
               >
                 {m.content}
               </p>
-              {m.role === "assistant" && m.sources && <Sources sources={m.sources} />}
+              {m.role === "assistant" && m.sources && <Sources sources={m.sources} currentChapter={currentChapter} onJump={onJump} />}
             </div>
           </div>
         ))}
         {pending && (
           <div className="flex justify-start">
-            <p className="rounded-2xl rounded-bl-md bg-accent-soft px-4 py-2.5 text-sm text-muted">
-              Looking through chapters 1–{boundary}…
+            <p className="rounded-2xl rounded-bl-md bg-accent-soft px-4 py-2.5 text-sm text-muted" data-testid="chat-loading">
+              {context ? "Looking through what you've read…" : `Looking through chapters 1–${boundary}…`}
             </p>
           </div>
         )}
@@ -204,17 +303,17 @@ export function AssistantChat({
             send(input);
           }}
         >
-          <label htmlFor="chat-input" className="sr-only">
+          <label htmlFor={panel ? "reader-chat-input" : "chat-input"} className="sr-only">
             Ask about the story
           </label>
           <input
-            id="chat-input"
+            id={panel ? "reader-chat-input" : "chat-input"}
             value={input}
             maxLength={500}
             disabled={!configured}
             onChange={(e) => setInput(e.target.value)}
             placeholder={configured ? "Ask about characters, plot, lore…" : "Set up the API key to ask questions"}
-            className="min-w-0 flex-1 rounded-full border border-border bg-background px-4 py-2.5 text-sm outline-none focus:border-accent disabled:opacity-60"
+            className="min-w-0 flex-1 rounded-full border border-border bg-background px-4 py-2.5 text-sm text-foreground outline-none placeholder:text-muted focus:border-accent disabled:opacity-60"
           />
           <button
             type="submit"

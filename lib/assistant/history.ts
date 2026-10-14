@@ -1,21 +1,29 @@
-import type { HistoryMessage } from "./types";
+import type { HistoryMessage, ReadingPosition } from "./types";
+
+/** Lexicographic: a later chapter is always later; within a chapter, a later paragraph is later. */
+export const comparePositions = (a: ReadingPosition, b: ReadingPosition) => a.chapter - b.chapter || a.block - b.block;
 
 /**
  * Conversation context for a follow-up question, under a size budget.
  *
  * Spoiler rule: earlier messages can NEVER carry the reader past their current position. Each stored
- * message remembers the boundary it was produced under; a message produced under a HIGHER boundary
- * than today's (the reader moved backward) may contain events they have not reached, so it is dropped,
- * and so is any message with an unknown boundary. History is context only; it is never evidence.
+ * message remembers the position it was produced under, as (complete chapters, paragraph within the next
+ * chapter). A message produced under a position AFTER today's (the reader moved backward, even by a few
+ * paragraphs) may contain events they have not reached, so it is dropped, and so is any message with an
+ * unknown position. History is context only; it is never evidence.
+ *
+ * `position` may be a plain number (complete chapters, no in-chapter position) for chapter-level callers.
  */
 export function selectHistory(
   messages: HistoryMessage[],
-  boundary: number,
+  position: number | ReadingPosition,
   opts: { historyChars: number; historyMessages: number },
 ): { role: "user" | "assistant"; content: string }[] {
   if (opts.historyChars <= 0 || opts.historyMessages <= 0) return [];
+  const now: ReadingPosition = typeof position === "number" ? { chapter: position, block: -1 } : position;
 
-  const safe = (m: HistoryMessage) => m.boundary_chapter !== null && m.boundary_chapter <= boundary;
+  const safe = (m: HistoryMessage) =>
+    m.boundary_chapter !== null && comparePositions({ chapter: m.boundary_chapter, block: m.boundary_block ?? -1 }, now) <= 0;
 
   // Only complete user→assistant pairs where BOTH sides are within the boundary.
   const pairs: [HistoryMessage, HistoryMessage][] = [];

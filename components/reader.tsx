@@ -2,12 +2,17 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { addBookmark, markChapterRead, saveProgress } from "@/app/actions/reading";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { addBookmark, markChapterRead, recordReadingCheckpoint, saveProgress } from "@/app/actions/reading";
+import type { Citation } from "@/lib/assistant/types";
 import { imageUrl, toBlocks } from "@/lib/chapter-content";
 import { createProgressSaver, type ProgressSaver } from "@/lib/progress-saver";
+import type { ChatMessage } from "@/lib/types";
+import { AssistantChat, type ChatContext } from "./assistant-chat";
 import { ChapterImage } from "./chapter-image";
 import { ChapterPicker } from "./chapter-picker";
+import { useScrollBoundary } from "./use-block-tracking";
+
 
 type Prefs = { size: number; font: "serif" | "sans"; wide: boolean };
 const DEFAULT_PREFS: Prefs = { size: 19, font: "serif", wide: false };
@@ -51,46 +56,78 @@ function parsePrefs(raw: string): Prefs {
   }
 }
 
+// "Is this a phone-sized screen?" (the chat is a bottom sheet there, a side panel on wide screens)
+const MOBILE_QUERY = "(max-width: 1023px)";
+const subscribeMedia = (cb: () => void) => {
+  const mq = window.matchMedia(MOBILE_QUERY);
+  mq.addEventListener("change", cb);
+  return () => mq.removeEventListener("change", cb);
+};
+
 type ChapterRef = { number: number; title: string };
+
+export type ReaderChatProps = { initialMessages: ChatMessage[]; configured: boolean; modelLabel: string };
 
 export function Reader(props: {
   bookId: string;
   bookTitle: string;
-  chapter: { number: number; title: string; content: string | null };
+  chapter: { number: number; title: string; content: string | null; rev: number };
   /** Illustrations of this chapter by id. Markers that aren't listed here are ignored. */
   images: Record<string, { id: string; width: number | null; height: number | null; alt: string | null }>;
   chapters: ChapterRef[];
   initialPct: number;
   bookSourceUrl: string | null;
-  /** Last chapter finished so far: the spoiler boundary the assistant respects. */
+  /** Chapters 1..lastRead are finished: the chapter-level spoiler boundary. */
   lastRead: number;
+  /** Blocks 0..partialBlock of chapter lastRead+1 are read (-1 = none; already checked against this text revision). */
+  partialBlock: number;
+  /** Paragraph at the top of the screen when the reader last left THIS chapter (null = unknown) */
+  resumeBlock: number | null;
+  /** Chapter where the reader last left off (for the way back from a citation visit) */
+  resumeChapter: number;
+  /** ?block= : a paragraph to scroll to (a citation) */
+  focusBlock: number | null;
+  /** Opened from a citation: nothing about reading progress is saved or advanced in this visit. */
+  visit: boolean;
+  volumeLabel: string | null;
+  chat: ReaderChatProps;
 }) {
-  const { bookId, bookTitle, chapter, chapters, initialPct, bookSourceUrl, images } = props;
+  const { bookId, bookTitle, chapter, chapters, initialPct, bookSourceUrl, images, focusBlock, visit, resumeChapter } = props;
   const [boundary, setBoundary] = useState(props.lastRead);
   const router = useRouter();
 
   const raw = useSyncExternalStore(subscribe, readRaw, () => "");
   const prefs = raw ? parsePrefs(raw) : DEFAULT_PREFS;
   const [showSettings, setShowSettings] = useState(false);
+  const [chatOpen, setChatOpen] = useState(false);
+  const isMobile = useSyncExternalStore(subscribeMedia, () => window.matchMedia(MOBILE_QUERY).matches, () => false);
 
   const idx = chapters.findIndex((c) => c.number === chapter.number);
   const prev = idx > 0 ? chapters[idx - 1] : null;
   const next = idx >= 0 && idx < chapters.length - 1 ? chapters[idx + 1] : null;
 
+  const blocks = useMemo(() => toBlocks(chapter.content ?? ""), [chapter.content]);
+  const lastBlock = blocks.length - 1;
+
   const [pct, setPct] = useState(initialPct);
   const [toast, setToast] = useState<string | null>(null);
+  const [highlight, setHighlight] = useState<number | null>(focusBlock);
+  const [canGoBack, setCanGoBack] = useState(false);
   const finished = useRef(false);
-  // Saves the position after a pause AND whenever the reader leaves (see flushProgress).
+  const returnY = useRef(0);
+  // Saves the resume position after a pause AND whenever the reader leaves (see flushProgress).
   const saver = useRef<ProgressSaver | null>(null);
   const flushProgress = useCallback(() => saver.current?.flush(), []);
+  // Checkpoints of the tracked position go to the server one at a time, in order.
+  const checkpointChain = useRef<Promise<unknown>>(Promise.resolve());
 
   const flash = useCallback((text: string) => {
     setToast(text);
-    setTimeout(() => setToast(null), 2200);
+    setTimeout(() => setToast(null), 2600);
   }, []);
 
   const finishChapter = useCallback(async () => {
-    if (finished.current) return;
+    if (visit || finished.current) return;
     finished.current = true;
     const res = await markChapterRead(bookId, chapter.number, "advance");
     if (!res.ok) {
@@ -102,9 +139,44 @@ export function Reader(props: {
     if (res.data.skippedAhead) {
       flash(`Spoiler protection stays at chapter ${res.data.lastRead}: earlier chapters aren't marked read.`);
     }
-  }, [bookId, chapter.number, flash]);
+  }, [bookId, chapter.number, flash, visit]);
 
-  // Explicit "I've read everything before this chapter".
+  // ----- reading boundary: everything above the top of the screen is read, the rest is not -----
+  const trackingEnabled = !visit && !!chapter.content && chapter.number === boundary + 1;
+  const sendBoundary = useCallback(
+    (n: number) => {
+      // One request at a time, in order, so the server always ends up with the latest position.
+      const run = checkpointChain.current.then(() => recordReadingCheckpoint(bookId, chapter.number, n, chapter.rev));
+      checkpointChain.current = run.catch(() => undefined);
+      return run;
+    },
+    [bookId, chapter.number, chapter.rev],
+  );
+  const tracking = useScrollBoundary({
+    enabled: trackingEnabled,
+    initialBoundary: props.partialBlock,
+    onChange: (n) => void sendBoundary(n),
+  });
+  const trackingRef = useRef(tracking);
+  useEffect(() => {
+    trackingRef.current = tracking;
+  });
+  const { captureAnchor, restoreAnchor, scrollToBlock, suspend, release } = tracking;
+
+  // Keep the reader on the same paragraph when the layout changes (text size, font, width, chat panel).
+  useLayoutEffect(() => {
+    restoreAnchor();
+  }, [raw, chatOpen, restoreAnchor]);
+  const changePrefs = (nextPrefs: Prefs) => {
+    captureAnchor();
+    writePrefs(nextPrefs);
+  };
+  const toggleChat = () => {
+    captureAnchor();
+    setChatOpen((o) => !o);
+  };
+
+  // Explicit "Mark earlier chapters read".
   async function markEarlierRead() {
     const res = await markChapterRead(bookId, chapter.number - 1, "set");
     if (res.ok) {
@@ -116,30 +188,83 @@ export function Reader(props: {
     }
   }
 
-  // Restore the saved scroll position once the text is laid out.
+  // Before a question is sent, the server gets the boundary as it is RIGHT NOW (it never takes one from the
+  // question). If that cannot be confirmed the question is not sent, so an older, further boundary is never used.
+  const beforeAsk = useCallback(async () => {
+    flushProgress();
+    if (!trackingEnabled) return;
+    const n = trackingRef.current.reportNow();
+    const res = await sendBoundary(n);
+    if (!res.ok || !res.data.applied) {
+      trackingRef.current.setReported(Number.NaN);
+      const why = !res.ok
+        ? res.error
+        : res.data.reason === "stale_revision"
+          ? "This chapter's text changed. Reload the page and try again."
+          : "Couldn't save your reading position.";
+      throw new Error(`${why} Your question was not sent.`);
+    }
+  }, [flushProgress, trackingEnabled, sendBoundary]);
+
+  // Citation inside the chapter being read: scroll to that paragraph, highlight it, and offer a way back.
+  const jumpTo = useCallback(
+    (c: Citation) => {
+      if (c.block === null || c.chapter !== chapter.number) return false;
+      returnY.current = window.scrollY;
+      if (isMobile) setChatOpen(false); // the sheet covers the text
+      const ok = scrollToBlock(c.block, true);
+      if (!ok) return false;
+      setHighlight(c.block);
+      setCanGoBack(true);
+      window.setTimeout(() => setHighlight((h) => (h === c.block ? null : h)), 3500);
+      return true;
+    },
+    [chapter.number, isMobile, scrollToBlock],
+  );
+  const goBack = () => {
+    suspend(1800);
+    window.scrollTo({ top: returnY.current, behavior: "smooth" });
+    setCanGoBack(false);
+    setHighlight(null);
+  };
+
+  // Put the reader back: at a cited paragraph, else at the paragraph where they stopped (so a different font size
+  // or window width still lands on the same words), else at the saved scroll fraction.
   useEffect(() => {
-    if (initialPct > 0.01) {
+    if (!chapter.content) return;
+    suspend(2000);
+    if (focusBlock !== null) {
+      scrollToBlock(focusBlock);
+    } else if (props.resumeBlock !== null && !visit) {
+      scrollToBlock(Math.min(props.resumeBlock, lastBlock));
+    } else if (initialPct > 0.01) {
       requestAnimationFrame(() => {
         const max = document.documentElement.scrollHeight - window.innerHeight;
         window.scrollTo(0, max * initialPct);
       });
     }
-    void saveProgress(bookId, chapter.number, initialPct);
-  }, [bookId, chapter.number, initialPct]);
+    // A citation visit must not change where the reader is considered to be reading.
+    if (!visit) void saveProgress(bookId, chapter.number, initialPct, props.resumeBlock);
+    // From here on the boundary follows the scroll position (the restore above must have settled first).
+    const settle = window.setTimeout(release, 500);
+    return () => window.clearTimeout(settle);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- run once per chapter visit
+  }, [bookId, chapter.number]);
 
-  // Track scroll → debounced save; reaching the end finishes the chapter.
+  // Scroll → progress bar, and the debounced resume position.
   useEffect(() => {
+    if (visit) return;
     const s = createProgressSaver({
       initial: initialPct,
-      save: (p) => void saveProgress(bookId, chapter.number, p),
+      save: (p) => void saveProgress(bookId, chapter.number, p, trackingRef.current?.getTopBlock() ?? null),
     });
     saver.current = s;
     function onScroll() {
       const max = document.documentElement.scrollHeight - window.innerHeight;
       const p = max > 0 ? Math.min(1, Math.max(0, window.scrollY / max)) : 1;
       setPct(p);
-      s.update(p);
-      if (p >= 0.97 && chapter.content) void finishChapter();
+      // Right after a citation jump the resume position stays where the reader WAS until they scroll by themselves.
+      if (trackingRef.current?.hasUserMovedSinceJump() !== false) s.update(p);
     }
     const onHide = () => {
       if (document.visibilityState === "hidden") s.flush();
@@ -154,19 +279,24 @@ export function Reader(props: {
       s.flush(); // leaving this chapter for any reason: keep the position
       saver.current = null;
     };
-  }, [bookId, chapter.number, chapter.content, finishChapter, initialPct]);
+  }, [bookId, chapter.number, initialPct, visit]);
 
-  // Keyboard navigation between chapters.
+  // Keyboard navigation between chapters; Escape closes the chat.
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       const t = e.target as HTMLElement;
+      if (e.key === "Escape" && chatOpen) {
+        toggleChat();
+        return;
+      }
       if (t.closest("input, select, textarea, [role='dialog'], [role='listbox']") || e.metaKey || e.ctrlKey || e.altKey) return;
       if (e.key === "ArrowLeft" && prev) router.push(`/library/${bookId}/read/${prev.number}`);
       if (e.key === "ArrowRight" && next) router.push(`/library/${bookId}/read/${next.number}`);
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [bookId, prev, next, router]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- toggleChat is recreated every render and only reads fresh state
+  }, [bookId, prev, next, router, chatOpen]);
 
   async function bookmark() {
     const res = await addBookmark(bookId, chapter.number, saver.current?.latest ?? 0, "");
@@ -179,9 +309,21 @@ export function Reader(props: {
     router.push(`/library/${bookId}/read/${next.number}`);
   }
 
-  const blocks = toBlocks(chapter.content ?? "");
   const button =
     "grid h-10 min-w-10 place-items-center rounded-full border border-border px-3 text-sm text-muted transition hover:text-foreground disabled:opacity-40";
+
+  const context: ChatContext = {
+    book: bookTitle,
+    volume: props.volumeLabel,
+    chapter: chapter.number,
+    chapterTitle: chapter.title,
+    readTo:
+      boundary === 0 && chapter.number !== 1
+        ? "nothing yet"
+        : boundary === 0
+          ? "only the text above your current position"
+          : `chapters 1–${boundary}${chapter.number === boundary + 1 ? " and the text above your current position" : ""}`,
+  };
 
   return (
     <div className="min-h-screen bg-background">
@@ -213,6 +355,23 @@ export function Reader(props: {
               }}
             />
           </div>
+          <button
+            type="button"
+            onClick={toggleChat}
+            aria-expanded={chatOpen}
+            aria-controls="reader-chat"
+            data-testid="open-chat"
+            title="Ask the assistant about what you've read"
+            className={`flex h-10 shrink-0 items-center gap-1.5 rounded-full border px-3 text-sm font-medium transition focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-accent ${
+              chatOpen ? "border-accent bg-accent-soft text-accent" : "border-border bg-surface text-foreground hover:border-accent hover:text-accent"
+            }`}
+          >
+            <svg viewBox="0 0 24 24" className="size-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <path d="M21 12a8 8 0 0 1-11.5 7.2L4 21l1.8-5.5A8 8 0 1 1 21 12z" />
+            </svg>
+            <span className="hidden sm:inline">Ask</span>
+            <span className="sr-only sm:hidden">Ask the assistant</span>
+          </button>
           <button type="button" onClick={bookmark} className={button} aria-label="Add bookmark" disabled={!chapter.content}>
             ⚑
           </button>
@@ -231,15 +390,15 @@ export function Reader(props: {
         </div>
 
         {showSettings && (
-          <div className="absolute right-3 top-14 w-64 space-y-4 rounded-2xl border border-border bg-surface p-4 shadow-lg sm:right-[max(1rem,calc(50%-27rem))]">
+          <div className="absolute right-3 top-14 w-64 space-y-4 rounded-2xl border border-border bg-surface p-4 text-foreground shadow-lg sm:right-[max(1rem,calc(50%-27rem))]">
             <div>
               <p className="mb-2 text-xs font-medium text-muted">Text size</p>
               <div className="flex items-center gap-2">
-                <button type="button" className={button} onClick={() => writePrefs({ ...prefs, size: Math.max(14, prefs.size - 1) })} aria-label="Smaller text">
+                <button type="button" className={button} onClick={() => changePrefs({ ...prefs, size: Math.max(14, prefs.size - 1) })} aria-label="Smaller text">
                   A−
                 </button>
                 <span className="flex-1 text-center text-sm">{prefs.size}px</span>
-                <button type="button" className={button} onClick={() => writePrefs({ ...prefs, size: Math.min(28, prefs.size + 1) })} aria-label="Larger text">
+                <button type="button" className={button} onClick={() => changePrefs({ ...prefs, size: Math.min(28, prefs.size + 1) })} aria-label="Larger text">
                   A+
                 </button>
               </div>
@@ -252,7 +411,7 @@ export function Reader(props: {
                     key={f}
                     type="button"
                     aria-pressed={prefs.font === f}
-                    onClick={() => writePrefs({ ...prefs, font: f })}
+                    onClick={() => changePrefs({ ...prefs, font: f })}
                     className={`flex-1 rounded-full border px-3 py-2 text-sm ${prefs.font === f ? "border-accent bg-accent-soft text-accent" : "border-border text-muted"}`}
                   >
                     {f === "serif" ? "Serif" : "Sans"}
@@ -262,13 +421,24 @@ export function Reader(props: {
             </div>
             <label className="flex items-center justify-between text-sm">
               Wide layout
-              <input type="checkbox" checked={prefs.wide} onChange={(e) => writePrefs({ ...prefs, wide: e.target.checked })} className="size-4 accent-[var(--accent)]" />
+              <input type="checkbox" checked={prefs.wide} onChange={(e) => changePrefs({ ...prefs, wide: e.target.checked })} className="size-4 accent-[var(--accent)]" />
             </label>
           </div>
         )}
       </header>
 
-      {chapter.number > boundary + 1 && (
+      {visit && (
+        <div className="mx-auto max-w-xl px-5 pt-6" style={{ fontFamily: "var(--font-geist-sans), system-ui, sans-serif" }} data-testid="visit-banner">
+          <div className="rounded-2xl bg-accent-soft px-4 py-3 text-sm">
+            <p>Viewing a passage the assistant cited. Your reading position is unchanged.</p>
+            <Link href={`/library/${bookId}/read/${resumeChapter}`} className="mt-2 inline-block font-medium text-accent hover:underline" data-testid="visit-back">
+              ← Back to where you were reading (chapter {resumeChapter})
+            </Link>
+          </div>
+        </div>
+      )}
+
+      {!visit && chapter.number > boundary + 1 && (
         <div className="mx-auto max-w-xl px-5 pt-6" style={{ fontFamily: "var(--font-geist-sans), system-ui, sans-serif" }}>
           <div className="rounded-2xl bg-accent-soft px-4 py-3 text-sm">
             <p>
@@ -282,90 +452,102 @@ export function Reader(props: {
         </div>
       )}
 
-      <article
-        className={`mx-auto px-5 py-10 sm:py-14 ${prefs.wide ? "max-w-3xl" : "max-w-xl"}`}
-        style={{
-          fontSize: prefs.size,
-          lineHeight: 1.75,
-          fontFamily: prefs.font === "serif" ? "Georgia, 'Times New Roman', serif" : "var(--font-geist-sans), system-ui, sans-serif",
-        }}
-      >
-        <p className="text-xs font-medium uppercase tracking-wider text-muted" style={{ fontSize: 12 }}>
-          Chapter {chapter.number}
-        </p>
-        <h1 className="mt-1 text-balance font-bold leading-tight" style={{ fontSize: "1.6em" }}>
-          {chapter.title}
-        </h1>
-
-        {chapter.content ? (
-          <div className="mt-8 space-y-[1em]">
-            {blocks.map((b, i) => {
-              if (b.type === "text") return <p key={i}>{b.text}</p>;
-              const img = images[b.id];
-              return (
-                <figure key={i} className="my-[1.5em]">
-                  <ChapterImage
-                    src={img ? imageUrl(bookId, img.id) : null}
-                    alt={img?.alt ?? null}
-                    width={img?.width ?? null}
-                    height={img?.height ?? null}
-                    eager={i < 3}
-                  />
-                </figure>
-              );
-            })}
-          </div>
-        ) : (
-          <div className="mt-8 rounded-2xl border border-dashed border-border bg-surface p-6 text-center" style={{ fontSize: 15, fontFamily: "var(--font-geist-sans), system-ui, sans-serif" }}>
-            <p className="font-medium">No text for this chapter yet</p>
-            <p className="mt-2 text-sm text-muted">
-              Add the text from the book page, or read it on the original site and mark it finished here to keep your
-              progress in sync.
-            </p>
-            <div className="mt-4 flex flex-wrap justify-center gap-2">
-              <Link href={`/library/${bookId}`} className="rounded-full border border-border px-4 py-2 text-sm hover:bg-accent-soft">
-                Add text
-              </Link>
-              {bookSourceUrl && (
-                <a href={bookSourceUrl} target="_blank" rel="noopener noreferrer" className="rounded-full border border-border px-4 py-2 text-sm hover:bg-accent-soft">
-                  Open original site ↗
-                </a>
-              )}
-              <button
-                type="button"
-                onClick={async () => {
-                  await finishChapter();
-                  flash("Marked as read");
-                }}
-                className="rounded-full bg-accent px-4 py-2 text-sm font-medium text-accent-foreground"
-              >
-                {boundary >= chapter.number ? "Marked as read ✓" : "Mark as read"}
-              </button>
-            </div>
-          </div>
-        )}
-
-        <nav
-          className="mt-14 flex items-center justify-between gap-3 border-t border-border pt-6"
-          style={{ fontSize: 14, fontFamily: "var(--font-geist-sans), system-ui, sans-serif" }}
-          aria-label="Chapter navigation"
+      <div className={chatOpen ? "lg:mr-[24rem]" : ""}>
+        <article
+          className={`mx-auto px-5 py-10 sm:py-14 ${prefs.wide ? "max-w-3xl" : "max-w-xl"}`}
+          style={{
+            fontSize: prefs.size,
+            lineHeight: 1.75,
+            fontFamily: prefs.font === "serif" ? "Georgia, 'Times New Roman', serif" : "var(--font-geist-sans), system-ui, sans-serif",
+          }}
         >
-          {prev ? (
-            <Link href={`/library/${bookId}/read/${prev.number}`} className={button}>
-              ← Previous
-            </Link>
+          <p className="text-xs font-medium uppercase tracking-wider text-muted" style={{ fontSize: 12 }}>
+            Chapter {chapter.number}
+          </p>
+          <h1 className="mt-1 text-balance font-bold leading-tight" style={{ fontSize: "1.6em" }}>
+            {chapter.title}
+          </h1>
+
+          {chapter.content ? (
+            <div className="mt-8 space-y-[1em]" data-testid="chapter-body">
+              {blocks.map((b, i) => {
+                const lit = highlight === i;
+                const litClass = lit ? "rounded-md bg-accent-soft outline outline-2 outline-offset-4 outline-accent transition" : "";
+                const el =
+                  b.type === "text" ? (
+                    <p key={`b${i}`} data-block={i} id={`block-${i}`} className={`scroll-mt-24 ${litClass}`}>
+                      {b.text}
+                    </p>
+                  ) : (
+                    (() => {
+                      const img = images[b.id];
+                      return (
+                        <figure key={`b${i}`} data-block={i} id={`block-${i}`} className={`my-[1.5em] scroll-mt-24 ${litClass}`}>
+                          <ChapterImage
+                            src={img ? imageUrl(bookId, img.id) : null}
+                            alt={img?.alt ?? null}
+                            width={img?.width ?? null}
+                            height={img?.height ?? null}
+                            eager={i < 3}
+                          />
+                        </figure>
+                      );
+                    })()
+                  );
+                return el;
+              })}
+            </div>
           ) : (
-            <span />
+            <div className="mt-8 rounded-2xl border border-dashed border-border bg-surface p-6 text-center" style={{ fontSize: 15, fontFamily: "var(--font-geist-sans), system-ui, sans-serif" }}>
+              <p className="font-medium">No text for this chapter yet</p>
+              <p className="mt-2 text-sm text-muted">
+                Add the text from the book page, or read it on the original site and mark it finished here to keep your
+                progress in sync.
+              </p>
+              <div className="mt-4 flex flex-wrap justify-center gap-2">
+                <Link href={`/library/${bookId}`} className="rounded-full border border-border px-4 py-2 text-sm hover:bg-accent-soft">
+                  Add text
+                </Link>
+                {bookSourceUrl && (
+                  <a href={bookSourceUrl} target="_blank" rel="noopener noreferrer" className="rounded-full border border-border px-4 py-2 text-sm hover:bg-accent-soft">
+                    Open original site ↗
+                  </a>
+                )}
+                <button
+                  type="button"
+                  onClick={async () => {
+                    await finishChapter();
+                    flash("Marked as read");
+                  }}
+                  disabled={visit}
+                  className="rounded-full bg-accent px-4 py-2 text-sm font-medium text-accent-foreground disabled:opacity-50"
+                >
+                  {boundary >= chapter.number ? "Marked as read ✓" : "Mark as read"}
+                </button>
+              </div>
+            </div>
           )}
-          {next ? (
-            <button type="button" onClick={goNext} className="rounded-full bg-accent px-5 py-2.5 font-medium text-accent-foreground hover:opacity-90">
-              Next chapter →
-            </button>
-          ) : (
-            boundary >= chapter.number ? (
-              <Link href={`/library/${bookId}#assistant`} className="rounded-full bg-accent px-5 py-2.5 font-medium text-accent-foreground">
-                Finished · Ask the assistant
+
+          <nav
+            className="mt-14 flex items-center justify-between gap-3 border-t border-border pt-6"
+            style={{ fontSize: 14, fontFamily: "var(--font-geist-sans), system-ui, sans-serif" }}
+            aria-label="Chapter navigation"
+          >
+            {prev ? (
+              <Link href={`/library/${bookId}/read/${prev.number}`} className={button}>
+                ← Previous
               </Link>
+            ) : (
+              <span />
+            )}
+            {next ? (
+              <button type="button" onClick={goNext} className="rounded-full bg-accent px-5 py-2.5 font-medium text-accent-foreground hover:opacity-90">
+                Next chapter →
+              </button>
+            ) : boundary >= chapter.number ? (
+              <button type="button" onClick={() => setChatOpen(true)} className="rounded-full bg-accent px-5 py-2.5 font-medium text-accent-foreground">
+                Finished · Ask the assistant
+              </button>
             ) : (
               <button
                 type="button"
@@ -373,17 +555,54 @@ export function Reader(props: {
                   await finishChapter();
                   flash("Chapter finished");
                 }}
-                className="rounded-full bg-accent px-5 py-2.5 font-medium text-accent-foreground hover:opacity-90"
+                disabled={visit}
+                className="rounded-full bg-accent px-5 py-2.5 font-medium text-accent-foreground hover:opacity-90 disabled:opacity-50"
               >
                 Mark chapter finished
               </button>
-            )
-          )}
-        </nav>
-      </article>
+            )}
+          </nav>
+        </article>
+      </div>
 
+      {/* The chat stays mounted while closed so the conversation and any unsent question survive. */}
+      {chatOpen && isMobile && (
+        <button type="button" aria-label="Close chat" tabIndex={-1} onClick={toggleChat} className="fixed inset-0 z-30 cursor-default bg-foreground/30 lg:hidden" />
+      )}
+      <aside
+        id="reader-chat"
+        aria-label="Ask about the story"
+        aria-hidden={!chatOpen}
+        data-testid="reader-chat"
+        className={`${chatOpen ? "" : "hidden"} fixed inset-x-0 bottom-0 z-40 h-[78vh] overflow-hidden rounded-t-2xl border-t border-border bg-surface text-foreground shadow-2xl lg:inset-x-auto lg:right-0 lg:top-[58px] lg:h-auto lg:w-[24rem] lg:rounded-none lg:border-l lg:border-t-0 lg:shadow-none`}
+      >
+        <AssistantChat
+          variant="panel"
+          bookId={bookId}
+          initialMessages={props.chat.initialMessages}
+          boundary={boundary}
+          configured={props.chat.configured}
+          modelLabel={props.chat.modelLabel}
+          context={context}
+          currentChapter={chapter.number}
+          onJump={jumpTo}
+          beforeAsk={beforeAsk}
+          onClose={toggleChat}
+        />
+      </aside>
+
+      {canGoBack && (
+        <button
+          type="button"
+          onClick={goBack}
+          data-testid="jump-back"
+          className="fixed bottom-20 left-1/2 z-30 -translate-x-1/2 rounded-full border border-border bg-surface px-4 py-2 text-sm font-medium text-foreground shadow-lg hover:border-accent hover:text-accent"
+        >
+          ↩ Back to where I was
+        </button>
+      )}
       {toast && (
-        <div role="status" className="fixed inset-x-0 bottom-6 z-30 mx-auto w-fit rounded-full bg-foreground px-4 py-2 text-sm text-background shadow-lg">
+        <div role="status" className="fixed inset-x-0 bottom-6 z-30 mx-auto w-fit max-w-[90vw] rounded-full bg-foreground px-4 py-2 text-sm text-background shadow-lg">
           {toast}
         </div>
       )}

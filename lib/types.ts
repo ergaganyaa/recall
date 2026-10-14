@@ -59,12 +59,21 @@ export type ChapterSummary = {
 
 export type Chapter = ChapterSummary & {
   content: string | null;
+  /** Changes whenever the chapter's text changes; a saved paragraph position is only valid for one revision */
+  content_rev: number;
 };
 
 export type Progress = {
+  /** Chapters 1..N finished: the chapter-level spoiler boundary */
   last_read_chapter: number;
   current_chapter: number;
   scroll_pct: number;
+  /** Blocks 0..N of chapter (last_read_chapter + 1) are read; -1 = none */
+  partial_read_block: number;
+  /** The text revision partial_read_block was recorded against */
+  partial_rev: number;
+  /** Block at the top of the screen when the reader last left: restores the exact place, whatever the layout */
+  resume_block: number | null;
 };
 
 export type Bookmark = {
@@ -80,6 +89,8 @@ export type ChatMessage = {
   role: "user" | "assistant";
   content: string;
   boundary_chapter: number | null;
+  /** Paragraph within the next chapter the reader had reached when this was written (-1 = none) */
+  boundary_block: number | null;
   created_at: string;
   /** Chapters an assistant answer drew on (null for questions and older messages) */
   sources: import("./assistant/types").Citation[] | null;

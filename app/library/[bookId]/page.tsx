@@ -14,6 +14,7 @@ import { ProgressBar } from "@/components/progress-bar";
 import { SetupNotice } from "@/components/setup-notice";
 import { BookSkeleton } from "@/components/skeletons";
 import { readAssistantConfig } from "@/lib/assistant/config";
+import { comparePositions } from "@/lib/assistant/history";
 import { requireUser } from "@/lib/auth";
 import { resolveCover } from "@/lib/cover";
 import { summarizeProgress } from "@/lib/progress-display";
@@ -150,7 +151,11 @@ async function BookContent({ params }: { params: PageProps<"/library/[bookId]">[
         <aside className="space-y-6 lg:sticky lg:top-24 lg:self-start">
           <AssistantChat
             bookId={book.id}
-            initialMessages={messages}
+            initialMessages={messages.filter(
+              (m) =>
+                m.boundary_chapter !== null &&
+                comparePositions({ chapter: m.boundary_chapter, block: m.boundary_block ?? -1 }, { chapter: progress.last_read_chapter, block: -1 }) <= 0,
+            )}
             boundary={lastRead}
             suggestions={book.is_sample ? SAMPLE_SUGGESTIONS : []}
             configured={assistant.apiKey !== null}

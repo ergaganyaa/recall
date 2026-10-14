@@ -20,42 +20,54 @@ export function cleanText(text: string): string {
  * Splits chapter text into passages of roughly TARGET characters on paragraph
  * boundaries (falling back to sentences for oversized paragraphs).
  */
+/** One paragraph → one or more pieces no longer than HARD_MAX (sentence split, then a hard cut as a last resort). */
+function splitParagraph(p: string): string[] {
+  if (p.length <= HARD_MAX) return [p];
+  const pieces: string[] = [];
+  let buf = "";
+  for (const s of p.split(/(?<=[.!?…。！？])\s+/)) {
+    if (buf && buf.length + s.length > TARGET) {
+      pieces.push(buf);
+      buf = "";
+    }
+    buf = buf ? `${buf} ${s}` : s;
+    while (buf.length > HARD_MAX) {
+      pieces.push(buf.slice(0, HARD_MAX));
+      buf = buf.slice(HARD_MAX);
+    }
+  }
+  if (buf) pieces.push(buf);
+  return pieces;
+}
+
 export function chunkText(text: string): string[] {
   const paragraphs = cleanText(text)
     .split(/\n{2,}|\n/)
     .map((p) => p.trim())
     .filter(Boolean);
+  return chunkBlocks(paragraphs.map((t, i) => ({ index: i, text: t }))).map((c) => c.text);
+}
 
-  const pieces: string[] = [];
-  for (const p of paragraphs) {
-    if (p.length <= HARD_MAX) {
-      pieces.push(p);
-      continue;
-    }
-    // Oversized paragraph: split on sentence ends, then hard-cut as a last resort.
-    let buf = "";
-    for (const s of p.split(/(?<=[.!?…。！？])\s+/)) {
-      if (buf && buf.length + s.length > TARGET) {
-        pieces.push(buf);
-        buf = "";
-      }
-      buf = buf ? `${buf} ${s}` : s;
-      while (buf.length > HARD_MAX) {
-        pieces.push(buf.slice(0, HARD_MAX));
-        buf = buf.slice(HARD_MAX);
-      }
-    }
-    if (buf) pieces.push(buf);
-  }
+export type RangedChunk = { text: string; /** first paragraph (block) index in the chunk */ first: number; /** last paragraph (block) index */ last: number };
 
-  const chunks: string[] = [];
-  let cur = "";
+/**
+ * Splits paragraphs into passages of roughly TARGET characters, recording which paragraphs (block indexes,
+ * as numbered by the reader) each passage covers. A paragraph is never split across a boundary between
+ * passages unless it is longer than HARD_MAX; pieces of one paragraph all carry that paragraph's index.
+ */
+export function chunkBlocks(blocks: { index: number; text: string }[]): RangedChunk[] {
+  const pieces = blocks.flatMap((b) => splitParagraph(b.text.trim()).map((text) => ({ text, index: b.index }))).filter((p) => p.text);
+
+  const chunks: RangedChunk[] = [];
+  let cur: RangedChunk | null = null;
   for (const piece of pieces) {
-    if (cur && cur.length + piece.length + 2 > TARGET) {
+    if (cur && cur.text.length + piece.text.length + 2 > TARGET) {
       chunks.push(cur);
-      cur = "";
+      cur = null;
     }
-    cur = cur ? `${cur}\n\n${piece}` : piece;
+    cur = cur
+      ? { text: `${cur.text}\n\n${piece.text}`, first: Math.min(cur.first, piece.index), last: Math.max(cur.last, piece.index) }
+      : { text: piece.text, first: piece.index, last: piece.index };
   }
   if (cur) chunks.push(cur);
   return chunks;

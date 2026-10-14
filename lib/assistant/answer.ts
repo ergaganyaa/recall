@@ -5,8 +5,9 @@
  *   question ─► spoiler-safe retrieval (boundary enforced in SQL) ─► budget + de-duplicate
  *            ─► prompt (sources as DATA) ─► provider ─► validate citations ─► answer
  *
- * The reading boundary is only ever the number the DATABASE returned. Nothing in this file accepts a
- * boundary from a caller or the client.
+ * The reading position is only ever the numbers the DATABASE returned: the chapters it says are complete,
+ * plus how much of the next chapter it says has been read. Nothing in this file accepts a position from a
+ * caller or the client.
  */
 import { extractCitations } from "./citations";
 import type { AssistantConfig } from "./config";
@@ -18,57 +19,63 @@ import { buildSearchTerms, selectPassages, subjectTermCount } from "./retrieval"
 import type { AnswerOutcome, ContextResult, HistoryMessage } from "./types";
 
 export type AnswerDeps = {
-  /** Spoiler-safe retrieval: the boundary and the passages come from one database call. */
+  /** Spoiler-safe retrieval: the position and the passages come from one database call. */
   getContext(terms: string[]): Promise<ContextResult>;
   /** Does the book have any text inside the boundary? Only asked when nothing matched. */
   hasReadableText(boundary: number): Promise<boolean>;
   provider: ChatProvider;
   config: AssistantConfig;
-  /** Recent stored messages, oldest first (all boundaries; filtered here). */
+  /** Recent stored messages, oldest first (all positions; filtered here). */
   history: HistoryMessage[];
   signal?: AbortSignal;
 };
 
 const NOT_STARTED =
-  "You haven't finished any chapters yet, so I have nothing I can safely draw on. Finish a chapter (or use “Read through here”) and ask again.";
+  "You haven't read anything yet, so I have nothing I can safely draw on. Read a little (or use “I've read up to here”) and ask again.";
 const NO_TEXT = "This book has no chapter text in Recall yet. Import or paste the text so I can look at what you've read.";
-const noEvidence = (boundary: number) =>
-  `I couldn't find anything about that in the chapters you've read (through chapter ${boundary}). It may not have come up yet, or try different words.`;
+const noEvidence = (boundary: number, partial: number) =>
+  partial >= 0
+    ? `I couldn't find anything about that in the chapters you've finished (through chapter ${boundary}) or the part of chapter ${boundary + 1} you've reached. It may not have come up yet, or try different words.`
+    : `I couldn't find anything about that in the chapters you've read (through chapter ${boundary}). It may not have come up yet, or try different words.`;
 
 export async function answerQuestion(args: { question: string; bookId: string; deps: AnswerDeps }): Promise<AnswerOutcome> {
   const { question, bookId, deps } = args;
   const { config } = deps;
+  const notFound = { kind: "error", code: "not_found", message: friendlyMessage("not_found") } as const;
 
-  // 1. Retrieval. The boundary is whatever the database says it is for THIS user and book.
+  // 1. Retrieval. The position is whatever the database says it is for THIS user and book.
   let ctx = await deps.getContext(buildSearchTerms(question));
-  if (ctx.boundary === null) return { kind: "error", code: "not_found", message: friendlyMessage("not_found") };
-  if (ctx.boundary === 0) return { kind: "not_started", text: NOT_STARTED, citations: [], boundary: 0 };
+  if (ctx.boundary === null) return notFound;
+  if (ctx.boundary === 0 && ctx.partial_block < 0) return { kind: "not_started", text: NOT_STARTED, citations: [], boundary: 0, partialBlock: -1 };
 
-  // 2. History, cut down to what is safe at THIS boundary (moving backward drops later messages).
-  let history = selectHistory(deps.history, ctx.boundary, config);
+  // 2. History, cut down to what is safe at THIS position (moving backward drops later messages).
+  let history = selectHistory(deps.history, { chapter: ctx.boundary, block: ctx.partial_block }, config);
 
   // 3. A follow-up with too few words of its own ("what happened next?") borrows the previous question's
   //    words, and retrieval runs again: old passages are never reused.
   if (subjectTermCount(question) < 2 && history.length > 0) {
     const refreshed = await deps.getContext(buildSearchTerms(question, userQuestions(history)));
-    if (refreshed.boundary === null) return { kind: "error", code: "not_found", message: friendlyMessage("not_found") };
-    if (refreshed.boundary === 0) return { kind: "not_started", text: NOT_STARTED, citations: [], boundary: 0 };
-    if (refreshed.boundary !== ctx.boundary) history = selectHistory(deps.history, refreshed.boundary, config);
+    if (refreshed.boundary === null) return notFound;
+    if (refreshed.boundary === 0 && refreshed.partial_block < 0) return { kind: "not_started", text: NOT_STARTED, citations: [], boundary: 0, partialBlock: -1 };
+    if (refreshed.boundary !== ctx.boundary || refreshed.partial_block !== ctx.partial_block) {
+      history = selectHistory(deps.history, { chapter: refreshed.boundary, block: refreshed.partial_block }, config);
+    }
     ctx = refreshed;
   }
   const boundary = ctx.boundary as number;
+  const partialBlock = ctx.partial_block;
 
   const passages = selectPassages(ctx.passages, config);
   if (passages.length === 0) {
     // Nothing relevant inside the boundary: say so without spending a model call.
-    const hasText = await deps.hasReadableText(boundary);
+    const hasText = partialBlock >= 0 || (await deps.hasReadableText(boundary));
     return hasText
-      ? { kind: "no_evidence", text: noEvidence(boundary), citations: [], boundary }
-      : { kind: "no_text", text: NO_TEXT, citations: [], boundary };
+      ? { kind: "no_evidence", text: noEvidence(boundary, partialBlock), citations: [], boundary, partialBlock }
+      : { kind: "no_text", text: NO_TEXT, citations: [], boundary, partialBlock };
   }
 
   // 4. Ask the model, with only these passages.
-  const prompt = buildPrompt({ question, passages, history, boundary });
+  const prompt = buildPrompt({ question, passages, history, boundary, partialBlock });
   let reply;
   try {
     reply = await deps.provider.generate({
@@ -87,5 +94,5 @@ export async function answerQuestion(args: { question: string; bookId: string; d
   // 5. Citations come from the passages we supplied, never from what the model claims to have read.
   const { text, citations } = extractCitations(reply.text, passages, bookId);
   if (!text) return { kind: "error", code: "empty", message: friendlyMessage("empty") };
-  return { kind: "answer", text, citations, boundary };
+  return { kind: "answer", text, citations, boundary, partialBlock };
 }

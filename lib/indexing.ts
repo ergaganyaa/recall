@@ -1,6 +1,7 @@
 import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { chunkText, cleanText, countWords } from "./chunking";
+import { toBlocks } from "./chapter-content";
+import { chunkBlocks, cleanText, countWords } from "./chunking";
 import type { OutlineGroup } from "./outline";
 import { validateChapterText } from "./text-file";
 
@@ -71,6 +72,8 @@ export type ChapterBody = {
   content: string;
   /** Marker-free passages: the ONLY thing that is ever searchable. */
   chunks: string[];
+  /** Paragraph (block) range of each chunk, parallel to `chunks`; omitted by legacy callers (stored as null) */
+  chunkRanges?: { first: number; last: number }[];
   wordCount: number;
   imageCount: number;
 };
@@ -103,6 +106,8 @@ export async function storeChapterBody(
     chapter_number: chapter.number,
     idx: base + i,
     content: text,
+    block_first: body.chunkRanges?.[i]?.first ?? null,
+    block_last: body.chunkRanges?.[i]?.last ?? null,
   }));
 
   const removeNew = () =>
@@ -143,9 +148,12 @@ export async function setChapterContent(
   const content = cleanText(rawContent);
   const problem = validateChapterText(content);
   if (problem) throw new Error(problem);
+  // Number paragraphs exactly as the reader does (toBlocks), so each passage knows which paragraphs it holds.
+  const ranged = chunkBlocks(toBlocks(content).flatMap((b, index) => (b.type === "text" ? [{ index, text: b.text }] : [])));
   await storeChapterBody(supabase, chapter, {
     content,
-    chunks: chunkText(content),
+    chunks: ranged.map((c) => c.text),
+    chunkRanges: ranged.map((c) => ({ first: c.first, last: c.last })),
     wordCount: countWords(content),
     imageCount: 0,
   });

@@ -21,6 +21,8 @@ export function passage(over: Partial<SourcePassage> & { chapter_number: number 
     arc: null,
     content: `Original sample passage number ${counter} about the lantern keeper.`,
     rank: 1 - counter / 1000,
+    block_first: null,
+    block_last: null,
     ...over,
   };
 }

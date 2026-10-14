@@ -11,7 +11,7 @@
  * searched, so image ids/alt text can never reach the assistant.
  */
 
-import { chunkText, countWords } from "./chunking";
+import { chunkBlocks, countWords } from "./chunking";
 import { MAX_CHAPTER_CHARS } from "./text-file";
 
 const UUID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
@@ -21,11 +21,18 @@ export const imageMarker = (id: string) => `[[image:${id}]]`;
 
 export type ContentBlock = { type: "text"; text: string } | { type: "image"; id: string };
 
+/**
+ * Blocks are numbered by their position in the list `toBlocks` returns (0, 1, 2…). The database numbers them
+ * the same way (chapter_block_lines, migration 0006): split on "\n", trim ONLY spaces/tabs/CR, drop empty
+ * lines. Keep the two definitions identical, or paragraph-level reading positions would drift.
+ */
+export const BLOCK_TRIM = /^[ \t\r]+|[ \t\r]+$/g;
+
 /** Splits content into ordered text/image blocks. */
 export function toBlocks(content: string): ContentBlock[] {
   const blocks: ContentBlock[] = [];
   for (const raw of content.split("\n")) {
-    const line = raw.trim();
+    const line = raw.replace(BLOCK_TRIM, "");
     if (!line) continue;
     const m = line.match(MARKER_LINE);
     blocks.push(m ? { type: "image", id: m[1].toLowerCase() } : { type: "text", text: line });
@@ -69,6 +76,8 @@ export type PreparedChapter = {
   /** What is searchable: text only, markers removed. */
   plainText: string;
   chunks: string[];
+  /** For each chunk, the first/last block index (paragraph) it covers, in the reader's numbering */
+  chunkRanges: { first: number; last: number }[];
   wordCount: number;
   imageIds: string[];
 };
@@ -97,14 +106,17 @@ export function prepareChapter(
   }
   if (!plainText && inText.length === 0) return { ok: false, error: "This chapter has no text and no illustrations." };
 
+  const blocks = toBlocks(lines);
+  // Chunk the TEXT blocks only (pictures are never searchable), keeping each block's index from the full list.
+  const ranged = chunkBlocks(blocks.flatMap((b, index) => (b.type === "text" ? [{ index, text: b.text }] : [])));
+
   return {
     ok: true,
     value: {
-      content: toBlocks(lines)
-        .map((b) => (b.type === "image" ? imageMarker(b.id) : b.text))
-        .join("\n"),
+      content: blocks.map((b) => (b.type === "image" ? imageMarker(b.id) : b.text)).join("\n"),
       plainText,
-      chunks: plainText ? chunkText(plainText) : [],
+      chunks: ranged.map((c) => c.text),
+      chunkRanges: ranged.map((c) => ({ first: c.first, last: c.last })),
       wordCount: countWords(plainText),
       imageIds: inText,
     },

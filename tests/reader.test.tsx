@@ -8,6 +8,12 @@ vi.mock("@/app/actions/reading", () => ({
   saveProgress: async () => ({ ok: true, data: undefined }),
   markChapterRead: async () => ({ ok: true, data: { lastRead: 0, skippedAhead: false } }),
   addBookmark: async () => ({ ok: false, error: "unused" }),
+  recordReadingCheckpoint: async () => ({ ok: true, data: { applied: false } }),
+  confirmReadingPosition: async () => ({ ok: true, data: { applied: false } }),
+}));
+vi.mock("@/app/actions/assistant", () => ({
+  askAssistant: async () => ({ ok: false, error: "unused" }),
+  clearChat: async () => ({ ok: true, data: undefined }),
 }));
 
 import { ChapterImage } from "@/components/chapter-image";
@@ -40,12 +46,19 @@ const render = (over: Partial<Parameters<typeof Reader>[0]> = {}) =>
     <Reader
       bookId={BOOK}
       bookTitle="The Sample Novel"
-      chapter={{ number: 3, title: "Title of chapter 3", content }}
+      chapter={{ number: 3, title: "Title of chapter 3", content, rev: 1 }}
       chapters={chapters}
       images={images}
       initialPct={0.4}
       bookSourceUrl={null}
       lastRead={2}
+      partialBlock={-1}
+      resumeBlock={null}
+      resumeChapter={3}
+      focusBlock={null}
+      visit={false}
+      volumeLabel="Vol. 1"
+      chat={{ initialMessages: [], configured: true, modelLabel: "test-model" }}
       {...over}
     />,
   );
@@ -231,5 +244,45 @@ describe("reader: illustrations inline", () => {
     const ok = renderToStaticMarkup(<ChapterImage src="/a.png" alt="x" width={100} height={50} />);
     expect(ok).toContain('src="/a.png"');
     expect(ok).toContain('loading="lazy"');
+  });
+});
+
+describe("reader: in-reader chat and reading position", () => {
+  it("every paragraph and picture carries its stable block number, in order", () => {
+    const html = render();
+    expect([...html.matchAll(/data-block="(\d+)"/g)].map((m) => Number(m[1]))).toEqual([0, 1, 2, 3, 4, 5, 6, 7]);
+  });
+
+  it("the chat shell is a closed, labelled panel that shows book, volume and chapter context", () => {
+    const html = render();
+    expect(html).toContain('data-testid="open-chat"');
+    expect(html).toMatch(/aria-expanded="false"[^>]*aria-controls="reader-chat"|aria-controls="reader-chat"[^>]*aria-expanded="false"/);
+    expect(html).toMatch(/<aside[^>]*id="reader-chat"[^>]*aria-hidden="true"/);
+    expect(html).toContain("Vol. 1 · Ch. 3 — Title of chapter 3");
+    expect(html).toContain("chapters 1–2");
+    expect(html).toContain("Nothing later is ever sent");
+  });
+
+  it("panel is a bottom sheet on phones and a side panel on wide screens, themed with tokens", () => {
+    const aside = render().match(/<aside[^>]*>/)![0];
+    expect(aside).toContain("bottom-0");
+    expect(aside).toContain("lg:w-[24rem]");
+    expect(aside).toContain("bg-surface");
+  });
+
+  it("a citation visit explains itself, links back, and tracks nothing", () => {
+    const html = render({ visit: true, resumeChapter: 5, focusBlock: 2 });
+    expect(html).toContain('data-testid="visit-banner"');
+    expect(html).toContain(`href="/library/${BOOK}/read/5"`);
+    expect(render()).not.toContain('data-testid="visit-banner"');
+  });
+
+  it("the boundary follows the scroll position: nothing finishes a chapter automatically, and a question is refused if the position cannot be saved", () => {
+    const source = readFileSync(path.resolve(import.meta.dirname, "../components/reader.tsx"), "utf8");
+    expect(source).not.toContain("0.97"); // the old 'scrolled 97% = finished' rule is gone
+    expect(source).not.toContain("lastBlock) void finishChapter");
+    expect(source).toContain("if (visit || finished.current) return;");
+    expect(source).toContain("const settle = window.setTimeout(release"); // only after the saved scroll position is restored
+    expect(source).toContain("Your question was not sent.");
   });
 });

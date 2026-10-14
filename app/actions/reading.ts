@@ -15,20 +15,22 @@ export async function saveProgress(
   bookId: string,
   chapter: number,
   scrollPct: number,
+  resumeBlock?: number | null,
 ): Promise<ActionResult> {
   await requireUser();
   const parsed = z
-    .object({ b: idSchema, c: chapterSchema, s: z.number().min(0).max(1) })
-    .safeParse({ b: bookId, c: chapter, s: scrollPct });
+    .object({ b: idSchema, c: chapterSchema, s: z.number().min(0).max(1), r: z.number().int().min(0).max(1_000_000).nullable() })
+    .safeParse({ b: bookId, c: chapter, s: scrollPct, r: resumeBlock ?? null });
   if (!parsed.success) return { ok: false, error: "Invalid request." };
 
   const supabase = await createClient();
-  // Only current_chapter/scroll_pct are written, so last_read_chapter is untouched.
+  // Only the resume position is written here: last_read_chapter and the in-chapter boundary are untouched.
   const { error } = await supabase.from("reading_progress").upsert(
     {
       book_id: parsed.data.b,
       current_chapter: parsed.data.c,
       scroll_pct: parsed.data.s,
+      resume_block: parsed.data.r,
       updated_at: new Date().toISOString(),
     },
     { onConflict: "book_id" },
@@ -78,12 +80,56 @@ export async function markChapterRead(
 
   if (result.changed || !existing) {
     const { error } = await supabase.from("reading_progress").upsert(
-      { book_id: parsed.data.b, last_read_chapter: result.lastRead, updated_at: new Date().toISOString() },
+      {
+        book_id: parsed.data.b,
+        last_read_chapter: result.lastRead,
+        // The chapter being read next is a different chapter now: nothing of it has been read yet.
+        ...(result.changed ? { partial_read_block: -1, partial_rev: 0 } : {}),
+        updated_at: new Date().toISOString(),
+      },
       { onConflict: "book_id" },
     );
     if (error) return { ok: false, error: "Couldn't update your progress." };
   }
   return { ok: true, data: { lastRead: result.lastRead, skippedAhead: result.skippedAhead } };
+}
+
+const checkpointSchema = z.object({
+  b: idSchema,
+  c: chapterSchema,
+  k: z.number().int().min(-1).max(1_000_000),
+  r: z.number().int().min(0).max(1_000_000_000),
+});
+
+export type CheckpointResult = { applied: boolean; reason?: string; lastReadChapter?: number; partialBlock?: number };
+
+/**
+ * The reading boundary: the last paragraph above the top of the screen (-1 = none), in either direction.
+ * The database function validates it against the real data (the book is yours, the chapter is the next one
+ * in line, the paragraph exists, the text revision matches). Nothing else the browser sends affects it.
+ */
+export async function recordReadingCheckpoint(
+  bookId: string,
+  chapter: number,
+  block: number,
+  rev: number,
+): Promise<ActionResult<CheckpointResult>> {
+  await requireUser();
+  const parsed = checkpointSchema.safeParse({ b: bookId, c: chapter, k: block, r: rev });
+  if (!parsed.success) return { ok: false, error: "Invalid request." };
+
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("record_reading_checkpoint", {
+    p_book_id: parsed.data.b,
+    p_chapter: parsed.data.c,
+    p_block: parsed.data.k,
+    p_rev: parsed.data.r,
+  });
+  if (error) {
+    return { ok: false, error: error.code === "42883" ? "Run migration 0007_scroll_boundary.sql in the Supabase SQL editor." : "Couldn't save your reading position." };
+  }
+  const r = data as { applied: boolean; reason?: string; last_read_chapter?: number; partial_read_block?: number };
+  return { ok: true, data: { applied: r.applied, reason: r.reason, lastReadChapter: r.last_read_chapter, partialBlock: r.partial_read_block } };
 }
 
 export async function addBookmark(

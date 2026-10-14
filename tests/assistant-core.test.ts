@@ -120,8 +120,8 @@ describe("citations (8: they match the retrieved passages)", () => {
     const { text, citations } = extractCitations("Mira owns the gear [1][2]. Later she travels [3].", passages, BOOK);
     expect(text).toBe("Mira owns the gear [1][2]. Later she travels [3].");
     expect(citations).toEqual([
-      { chapter: 2, label: "Vol. 1 · Ch. 2 — Two", href: `/library/${BOOK}/read/2`, indices: [1, 2], cited: true },
-      { chapter: 7, label: "Vol. 2 · Ch. 7 — Seven", href: `/library/${BOOK}/read/7`, indices: [3], cited: true },
+      { chapter: 2, label: "Vol. 1 · Ch. 2 — Two", href: `/library/${BOOK}/read/2?cite=1`, block: null, indices: [1, 2], cited: true },
+      { chapter: 7, label: "Vol. 2 · Ch. 7 — Seven", href: `/library/${BOOK}/read/7?cite=1`, block: null, indices: [3], cited: true },
     ]);
   });
 
@@ -135,7 +135,7 @@ describe("citations (8: they match the retrieved passages)", () => {
   it("builds citations from retrieval metadata, never from chapter numbers the model writes", () => {
     const { citations } = extractCitations("According to Chapter 99 of Volume 9, X happened [1].", passages, BOOK);
     expect(citations.every((c) => [2, 7].includes(c.chapter))).toBe(true);
-    expect(citations.some((c) => c.href.endsWith("/read/99"))).toBe(false);
+    expect(citations.some((c) => c.href.includes("/read/99"))).toBe(false);
   });
 
   it("lists consulted passages as uncited when the answer cites none", () => {
