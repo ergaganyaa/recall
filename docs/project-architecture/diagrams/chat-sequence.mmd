@@ -1,0 +1,28 @@
+sequenceDiagram
+  autonumber
+  participant R as Reader UI<br/>(browser)
+  participant S as Server Action<br/>askAssistant
+  participant D as PostgreSQL<br/>(RLS)
+  participant G as Gemini API
+
+  Note over R,D: While reading: boundary = last paragraph above the viewport top edge
+  R->>S: recordReadingCheckpoint<br/>(book, chapter, block, rev)
+  S->>D: rpc record_reading_checkpoint<br/>(validated)
+  Note over R: Reader asks a question
+  R->>S: send current boundary again<br/>(question aborted if this fails)
+  R->>S: askAssistant(bookId, question)<br/>no boundary parameter
+  S->>S: requireUser(), validate input,<br/>per-user rate limit
+  S->>D: rpc assistant_context<br/>(book, search terms)
+  Note over D: Reads the caller's own reading_progress, checks ownership.<br/>Chunks of finished chapters + paragraphs of the next chapter<br/>up to partial_read_block only.
+  D-->>S: allowed passages only, with boundary
+  alt no allowed passage matches
+    S-->>R: "Not found in what you have read"<br/>(no model call)
+  else passages found
+    S->>S: filter history by (chapter, paragraph),<br/>dedupe, size budget,<br/>build prompt (passages as data)
+    S->>G: generateContent<br/>(API key from server environment)
+    G-->>S: answer with [n] markers
+    S->>S: keep only valid [n] markers,<br/>build citation links
+    S->>D: save question and answer<br/>with the boundary used
+    S-->>R: answer + citations
+  end
+  Note over R,G: Citation click: scroll to the paragraph, or read-only visit (?cite=1)

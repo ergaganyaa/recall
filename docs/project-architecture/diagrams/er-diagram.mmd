@@ -1,0 +1,71 @@
+erDiagram
+  AUTH_USERS ||--o{ BOOKS : owns
+  BOOKS ||--o{ VOLUMES : has
+  BOOKS ||--o{ CHAPTERS : has
+  VOLUMES |o--o{ CHAPTERS : groups
+  CHAPTERS ||--o{ CHUNKS : "indexed as"
+  CHAPTERS |o--o{ BOOK_IMAGES : illustrates
+  BOOKS ||--o| READING_PROGRESS : "one per book"
+  BOOKS ||--o{ BOOKMARKS : has
+  BOOKS ||--o{ CHAT_MESSAGES : has
+
+  AUTH_USERS {
+    uuid id PK
+  }
+  BOOKS {
+    uuid id PK
+    uuid user_id FK
+    text title
+    text status
+    uuid cover_image_id FK
+  }
+  VOLUMES {
+    uuid id PK
+    uuid book_id FK
+    int number
+    text arc
+  }
+  CHAPTERS {
+    uuid id PK
+    uuid book_id FK
+    uuid volume_id FK
+    int number
+    text content
+    int content_rev
+  }
+  CHUNKS {
+    uuid id PK
+    uuid chapter_id FK
+    int chapter_number
+    text content
+    tsvector fts
+    int block_first
+    int block_last
+  }
+  READING_PROGRESS {
+    uuid book_id PK
+    int last_read_chapter
+    int partial_read_block
+    int partial_rev
+    int resume_block
+  }
+  BOOKMARKS {
+    uuid id PK
+    uuid book_id FK
+    int chapter_number
+    real scroll_pct
+  }
+  BOOK_IMAGES {
+    uuid id PK
+    uuid chapter_id FK
+    text storage_path
+    int position
+  }
+  CHAT_MESSAGES {
+    uuid id PK
+    uuid book_id FK
+    text role
+    int boundary_chapter
+    int boundary_block
+    jsonb sources
+  }
