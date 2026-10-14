@@ -4,6 +4,10 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { addBookmark, markChapterRead, saveProgress } from "@/app/actions/reading";
+import { imageUrl, toBlocks } from "@/lib/chapter-content";
+import { createProgressSaver, type ProgressSaver } from "@/lib/progress-saver";
+import { ChapterImage } from "./chapter-image";
+import { ChapterPicker } from "./chapter-picker";
 
 type Prefs = { size: number; font: "serif" | "sans"; wide: boolean };
 const DEFAULT_PREFS: Prefs = { size: 19, font: "serif", wide: false };
@@ -53,13 +57,15 @@ export function Reader(props: {
   bookId: string;
   bookTitle: string;
   chapter: { number: number; title: string; content: string | null };
+  /** Illustrations of this chapter by id. Markers that aren't listed here are ignored. */
+  images: Record<string, { id: string; width: number | null; height: number | null; alt: string | null }>;
   chapters: ChapterRef[];
   initialPct: number;
   bookSourceUrl: string | null;
   /** Last chapter finished so far: the spoiler boundary the assistant respects. */
   lastRead: number;
 }) {
-  const { bookId, bookTitle, chapter, chapters, initialPct, bookSourceUrl } = props;
+  const { bookId, bookTitle, chapter, chapters, initialPct, bookSourceUrl, images } = props;
   const [boundary, setBoundary] = useState(props.lastRead);
   const router = useRouter();
 
@@ -73,9 +79,10 @@ export function Reader(props: {
 
   const [pct, setPct] = useState(initialPct);
   const [toast, setToast] = useState<string | null>(null);
-  const pctRef = useRef(initialPct);
   const finished = useRef(false);
-  const saveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  // Saves the position after a pause AND whenever the reader leaves (see flushProgress).
+  const saver = useRef<ProgressSaver | null>(null);
+  const flushProgress = useCallback(() => saver.current?.flush(), []);
 
   const flash = useCallback((text: string) => {
     setToast(text);
@@ -122,40 +129,38 @@ export function Reader(props: {
 
   // Track scroll → debounced save; reaching the end finishes the chapter.
   useEffect(() => {
-    let dirty = false;
-    const flush = () => {
-      clearTimeout(saveTimer.current);
-      if (!dirty) return;
-      dirty = false;
-      void saveProgress(bookId, chapter.number, pctRef.current);
-    };
+    const s = createProgressSaver({
+      initial: initialPct,
+      save: (p) => void saveProgress(bookId, chapter.number, p),
+    });
+    saver.current = s;
     function onScroll() {
       const max = document.documentElement.scrollHeight - window.innerHeight;
       const p = max > 0 ? Math.min(1, Math.max(0, window.scrollY / max)) : 1;
-      pctRef.current = p;
       setPct(p);
-      dirty = true;
-      clearTimeout(saveTimer.current);
-      saveTimer.current = setTimeout(flush, 1200);
+      s.update(p);
       if (p >= 0.97 && chapter.content) void finishChapter();
     }
     const onHide = () => {
-      if (document.visibilityState === "hidden") flush();
+      if (document.visibilityState === "hidden") s.flush();
     };
     window.addEventListener("scroll", onScroll, { passive: true });
     document.addEventListener("visibilitychange", onHide);
+    window.addEventListener("pagehide", onHide);
     return () => {
       window.removeEventListener("scroll", onScroll);
       document.removeEventListener("visibilitychange", onHide);
-      flush(); // don't lose the last second of scrolling when navigating away
+      window.removeEventListener("pagehide", onHide);
+      s.flush(); // leaving this chapter for any reason: keep the position
+      saver.current = null;
     };
-  }, [bookId, chapter.number, chapter.content, finishChapter]);
+  }, [bookId, chapter.number, chapter.content, finishChapter, initialPct]);
 
   // Keyboard navigation between chapters.
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       const t = e.target as HTMLElement;
-      if (t.closest("input, select, textarea") || e.metaKey || e.ctrlKey || e.altKey) return;
+      if (t.closest("input, select, textarea, [role='dialog'], [role='listbox']") || e.metaKey || e.ctrlKey || e.altKey) return;
       if (e.key === "ArrowLeft" && prev) router.push(`/library/${bookId}/read/${prev.number}`);
       if (e.key === "ArrowRight" && next) router.push(`/library/${bookId}/read/${next.number}`);
     }
@@ -164,7 +169,7 @@ export function Reader(props: {
   }, [bookId, prev, next, router]);
 
   async function bookmark() {
-    const res = await addBookmark(bookId, chapter.number, pctRef.current, "");
+    const res = await addBookmark(bookId, chapter.number, saver.current?.latest ?? 0, "");
     flash(res.ok ? "Bookmark saved" : res.error);
   }
 
@@ -174,7 +179,7 @@ export function Reader(props: {
     router.push(`/library/${bookId}/read/${next.number}`);
   }
 
-  const paragraphs = (chapter.content ?? "").split(/\n+/).filter(Boolean);
+  const blocks = toBlocks(chapter.content ?? "");
   const button =
     "grid h-10 min-w-10 place-items-center rounded-full border border-border px-3 text-sm text-muted transition hover:text-foreground disabled:opacity-40";
 
@@ -182,26 +187,31 @@ export function Reader(props: {
     <div className="min-h-screen bg-background">
       <header className="sticky top-0 z-20 border-b border-border bg-background/90 backdrop-blur">
         <div className="mx-auto flex h-14 max-w-4xl items-center gap-2 px-3 sm:px-4">
-          <Link href={`/library/${bookId}`} className={button} aria-label="Back to book">
-            ←
+          <Link
+            href={`/library/${bookId}`}
+            onClick={flushProgress}
+            aria-label={`Back to the book page: ${bookTitle}`}
+            title="Back to the book page (volumes and chapters). Your place is saved."
+            data-testid="back-to-book"
+            className="flex h-10 shrink-0 items-center gap-2 rounded-full border border-border bg-surface px-3 text-sm font-medium text-foreground transition hover:border-accent hover:text-accent focus-visible:outline-2 focus-visible:outline-accent"
+          >
+            <svg viewBox="0 0 24 24" className="size-4 shrink-0" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <path d="M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2z" />
+              <path d="M4 21V5" />
+            </svg>
+            <span className="sm:hidden">Book</span>
+            <span className="hidden sm:inline">Back to book</span>
           </Link>
           <div className="min-w-0 flex-1">
             <p className="truncate text-xs text-muted">{bookTitle}</p>
-            <label className="sr-only" htmlFor="jump">
-              Jump to chapter
-            </label>
-            <select
-              id="jump"
-              value={chapter.number}
-              onChange={(e) => router.push(`/library/${bookId}/read/${e.target.value}`)}
-              className="w-full max-w-full truncate bg-transparent text-sm font-medium outline-none"
-            >
-              {chapters.map((c) => (
-                <option key={c.number} value={c.number}>
-                  Ch. {c.number} — {c.title}
-                </option>
-              ))}
-            </select>
+            <ChapterPicker
+              chapters={chapters}
+              current={chapter.number}
+              onSelect={(n) => {
+                flushProgress();
+                router.push(`/library/${bookId}/read/${n}`);
+              }}
+            />
           </div>
           <button type="button" onClick={bookmark} className={button} aria-label="Add bookmark" disabled={!chapter.content}>
             ⚑
@@ -289,9 +299,21 @@ export function Reader(props: {
 
         {chapter.content ? (
           <div className="mt-8 space-y-[1em]">
-            {paragraphs.map((p, i) => (
-              <p key={i}>{p}</p>
-            ))}
+            {blocks.map((b, i) => {
+              if (b.type === "text") return <p key={i}>{b.text}</p>;
+              const img = images[b.id];
+              return (
+                <figure key={i} className="my-[1.5em]">
+                  <ChapterImage
+                    src={img ? imageUrl(bookId, img.id) : null}
+                    alt={img?.alt ?? null}
+                    width={img?.width ?? null}
+                    height={img?.height ?? null}
+                    eager={i < 3}
+                  />
+                </figure>
+              );
+            })}
           </div>
         ) : (
           <div className="mt-8 rounded-2xl border border-dashed border-border bg-surface p-6 text-center" style={{ fontSize: 15, fontFamily: "var(--font-geist-sans), system-ui, sans-serif" }}>

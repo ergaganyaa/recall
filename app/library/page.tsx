@@ -2,6 +2,8 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { Suspense } from "react";
 import { addSampleBook } from "@/app/actions/library";
+import { MigrationNotice } from "@/components/migration-notice";
+import { schemaIsCurrent } from "@/lib/schema";
 import { LibraryGrid } from "@/components/library-grid";
 import { SetupNotice } from "@/components/setup-notice";
 import { LibrarySkeleton } from "@/components/skeletons";
@@ -22,6 +24,7 @@ export default function LibraryPage() {
 
 async function LibraryContent() {
   await requireUser();
+  if (!(await schemaIsCurrent())) return <MigrationNotice />;
   const books = await listLibrary();
 
   return (

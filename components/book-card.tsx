@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { deleteBook, updateBookStatus } from "@/app/actions/library";
+import { summarizeProgress } from "@/lib/progress-display";
 import type { LibraryItem } from "@/lib/queries";
 import { BOOK_STATUSES, STATUS_LABELS, type BookStatus } from "@/lib/types";
 import { BookCover } from "./book-cover";
@@ -14,9 +15,8 @@ export function BookCard({ book }: { book: LibraryItem }) {
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
-  const percent = book.chapter_count
-    ? Math.round((Math.min(book.last_read_chapter, book.chapter_count) / book.chapter_count) * 100)
-    : 0;
+  const summary = summarizeProgress({ chapters: book.chapters, lastRead: book.last_read_chapter, status: book.status });
+  const percent = summary.percent;
 
   function run(action: () => Promise<{ ok: boolean; error?: string }>) {
     setError(null);
@@ -34,12 +34,12 @@ export function BookCard({ book }: { book: LibraryItem }) {
       }`}
     >
       <Link href={`/library/${book.id}`} className="group flex flex-col gap-3">
-        <BookCover title={book.title} author={book.author} coverUrl={book.cover_url} />
+        <BookCover title={book.title} author={book.author} coverUrl={book.cover_src} />
         <div className="px-1">
           <h3 className="line-clamp-2 font-semibold leading-snug group-hover:text-accent">{book.title}</h3>
           <p className="mt-1 text-xs text-muted">
             {book.chapter_count
-              ? `${Math.min(book.last_read_chapter, book.chapter_count)} / ${book.chapter_count} chapters`
+              ? `${summary.finished} / ${book.chapter_count} chapters${book.content_count < book.chapter_count ? " · partly imported" : ""}`
               : "No chapters yet"}
             {book.is_sample && " · Sample"}
           </p>

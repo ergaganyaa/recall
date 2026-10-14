@@ -1,4 +1,5 @@
-import Link from "next/link";
+import { Suspense } from "react";
+import { HomeHero, LandingHero } from "@/components/home-hero";
 
 const features = [
   {
@@ -24,42 +25,9 @@ const steps = [
 export default function Home() {
   return (
     <>
-      <section className="relative overflow-hidden border-b border-border">
-        <div
-          className="absolute inset-0 -z-10 opacity-60"
-          style={{
-            backgroundImage:
-              "radial-gradient(60rem 28rem at 80% -10%, var(--accent-soft), transparent), radial-gradient(40rem 20rem at 0% 0%, var(--accent-soft), transparent)",
-          }}
-          aria-hidden
-        />
-        <div className="mx-auto max-w-4xl px-4 py-20 text-center sm:px-6 sm:py-28">
-          <p className="inline-block rounded-full bg-accent-soft px-3 py-1 text-xs font-medium text-accent">
-            For light novels & long series
-          </p>
-          <h1 className="mt-5 text-balance text-4xl font-bold tracking-tight sm:text-6xl">
-            Come back after months. Remember everything. Spoil nothing.
-          </h1>
-          <p className="mx-auto mt-6 max-w-2xl text-lg leading-relaxed text-muted">
-            Recall tracks your place in long stories and answers questions about what you&apos;ve
-            already read — never a chapter further.
-          </p>
-          <div className="mt-8 flex flex-wrap justify-center gap-3">
-            <Link
-              href="/signup"
-              className="rounded-full bg-accent px-6 py-3 text-sm font-medium text-accent-foreground transition hover:opacity-90"
-            >
-              Get started
-            </Link>
-            <Link
-              href="/library"
-              className="rounded-full border border-border px-6 py-3 text-sm font-medium transition hover:bg-accent-soft"
-            >
-              Open my library
-            </Link>
-          </div>
-        </div>
-      </section>
+      <Suspense fallback={<LandingHero signedIn={false} />}>
+        <HomeHero />
+      </Suspense>
 
       <section className="mx-auto max-w-6xl px-4 py-14 sm:px-6">
         <div className="grid gap-4 sm:grid-cols-3">

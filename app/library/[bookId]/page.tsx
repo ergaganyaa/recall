@@ -1,7 +1,11 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
+import { MigrationNotice } from "@/components/migration-notice";
+import { schemaIsCurrent } from "@/lib/schema";
+import { CoverControl } from "@/components/cover-control";
 import { ChapterTools } from "@/components/chapter-tools";
+import { FeatureButton } from "@/components/feature-button";
 import { AssistantChat } from "@/components/assistant-chat";
 import { BookCover } from "@/components/book-cover";
 import { BookmarksList } from "@/components/bookmarks-list";
@@ -10,6 +14,8 @@ import { ProgressBar } from "@/components/progress-bar";
 import { SetupNotice } from "@/components/setup-notice";
 import { BookSkeleton } from "@/components/skeletons";
 import { requireUser } from "@/lib/auth";
+import { resolveCover } from "@/lib/cover";
+import { summarizeProgress } from "@/lib/progress-display";
 import { getBook, getBookStructure, getChat } from "@/lib/queries";
 import { isSupabaseConfigured } from "@/lib/supabase/config";
 import { STATUS_LABELS } from "@/lib/types";
@@ -28,6 +34,7 @@ export default function BookPage({ params }: PageProps<"/library/[bookId]">) {
 async function BookContent({ params }: { params: PageProps<"/library/[bookId]">["params"] }) {
   const { bookId } = await params;
   await requireUser();
+  if (!(await schemaIsCurrent())) return <MigrationNotice />;
   const book = await getBook(bookId);
   if (!book) notFound();
 
@@ -38,7 +45,9 @@ async function BookContent({ params }: { params: PageProps<"/library/[bookId]">[
 
   const total = chapters.length;
   const lastRead = Math.min(progress.last_read_chapter, total);
-  const percent = total ? Math.round((lastRead / total) * 100) : 0;
+  const cover = resolveCover(book, volumes);
+  const summary = summarizeProgress({ chapters, lastRead, status: book.status });
+  const percent = summary.percent;
   const lastReadChapter = chapters.find((c) => c.number === lastRead);
   const resumeTarget = chapters.find((c) => c.number === progress.current_chapter) ?? chapters[0];
   const started = lastRead > 0 || progress.scroll_pct > 0 || progress.current_chapter > 1;
@@ -53,7 +62,7 @@ async function BookContent({ params }: { params: PageProps<"/library/[bookId]">[
         <BookCover
           title={book.title}
           author={book.author}
-          coverUrl={book.cover_url}
+          coverUrl={cover.src}
           className="mx-auto w-44 md:w-full"
         />
         <div>
@@ -62,9 +71,13 @@ async function BookContent({ params }: { params: PageProps<"/library/[bookId]">[
               {STATUS_LABELS[book.status]}
             </span>
             {book.is_sample && <span className="ml-2">Sample content</span>}
+            <span className="ml-2 align-middle">
+              <FeatureButton bookId={book.id} featured={book.is_featured} />
+            </span>
           </p>
           <h1 className="mt-2 text-3xl font-bold tracking-tight sm:text-4xl">{book.title}</h1>
           {book.author && <p className="mt-1 text-muted">by {book.author}</p>}
+          <p className="mt-2"><CoverControl bookId={book.id} source={cover.source} /></p>
           {book.description && (
             <p className="mt-4 max-w-2xl whitespace-pre-line leading-relaxed">{book.description}</p>
           )}
@@ -88,6 +101,7 @@ async function BookContent({ params }: { params: PageProps<"/library/[bookId]">[
             <p className="mt-3 text-sm text-muted">
               {total ? `${lastRead} of ${total} chapters finished` : "No chapters yet"}
               {volumes.length > 1 && ` · ${volumes.length} volumes`}
+              {summary.note && <span className="block text-xs">{summary.note}</span>}
             </p>
             <div className="mt-3 rounded-xl bg-accent-soft px-3 py-2 text-sm">
               <span className="text-muted">Last read: </span>
@@ -111,9 +125,17 @@ async function BookContent({ params }: { params: PageProps<"/library/[bookId]">[
 
       <div className="mt-12 grid gap-8 lg:grid-cols-[1fr_24rem]">
         <section aria-labelledby="chapters-heading">
-          <h2 id="chapters-heading" className="mb-4 text-xl font-bold tracking-tight">
-            Volumes &amp; chapters
-          </h2>
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+            <h2 id="chapters-heading" className="text-xl font-bold tracking-tight">
+              Volumes &amp; chapters
+            </h2>
+            <Link
+              href={`/library/${book.id}/import`}
+              className="rounded-full bg-accent px-4 py-2 text-sm font-medium text-accent-foreground hover:opacity-90"
+            >
+              + Import a volume
+            </Link>
+          </div>
           <ChapterList
             bookId={book.id}
             volumes={volumes}

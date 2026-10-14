@@ -24,13 +24,25 @@ export type Book = {
   source_url: string | null;
   status: BookStatus;
   is_sample: boolean;
+  is_featured: boolean;
+  language: string | null;
+  cover_image_id: string | null;
   created_at: string;
 };
 
 export type Volume = {
   id: string;
+  /** Decimal-safe: 4.5 is a valid volume number. */
   number: number;
   title: string | null;
+  /** Arc / school year; (arc_order, number) is the reading order. */
+  arc: string | null;
+  arc_order: number;
+  language: string | null;
+  /** Set only when an import finished successfully; volumes without it never affect the book cover. */
+  imported_at: string | null;
+  /** This volume's own cover (separate from the illustrations inside the reader). */
+  cover_image_id: string | null;
 };
 
 export type ChapterSummary = {
@@ -40,6 +52,8 @@ export type ChapterSummary = {
   volume_id: string | null;
   source_url: string | null;
   word_count: number;
+  image_count: number;
+  /** True when the chapter has text or illustrations (false = catalog entry only). */
   has_content: boolean;
 };
 

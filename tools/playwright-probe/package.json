@@ -1,0 +1,9 @@
+{
+  "name": "recall-playwright-probe",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Standalone investigation of what a permitted catalog page exposes to a normal browser. NOT part of the Recall app.",
+  "type": "module",
+  "scripts": { "probe": "node probe.mjs" },
+  "devDependencies": { "playwright": "^1.50.0" }
+}

@@ -80,3 +80,27 @@ body {
     animation: none;
   }
 }
+
+/*
+ * Native <select> pop-ups and form controls are painted by the browser. Without an explicit colour pair they can
+ * show the browser's default light background under light-theme text (or the reverse), which is unreadable.
+ * Tie them to the theme tokens so every dropdown follows the active theme.
+ */
+select,
+option,
+optgroup {
+  background-color: var(--surface);
+  color: var(--foreground);
+}
+
+option:checked {
+  background-color: var(--accent-soft);
+  color: var(--accent);
+}
+
+input,
+textarea,
+select,
+button {
+  color-scheme: inherit;
+}

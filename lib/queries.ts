@@ -1,5 +1,6 @@
 import "server-only";
 import { cache } from "react";
+import { resolveCover, type CoverVolume } from "./cover";
 import { createClient } from "./supabase/server";
 import type {
   Book,
@@ -14,17 +15,36 @@ import type {
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export const isUuid = (v: string) => UUID.test(v);
 
-const BOOK_COLS =
-  "id,title,author,description,cover_url,source_url,status,is_sample,created_at";
+export const BOOK_COLS =
+  "id,title,author,description,cover_url,source_url,status,is_sample,is_featured,language,cover_image_id,created_at";
+const VOLUME_COLS = "id,number,title,arc,arc_order,language,imported_at,cover_image_id";
+const CHAPTER_COLS = "id,number,title,volume_id,source_url,word_count,image_count";
+
+type ChapterRow = Omit<ChapterSummary, "has_content">;
+const withContentFlag = (c: ChapterRow): ChapterSummary => ({
+  ...c,
+  has_content: c.word_count > 0 || c.image_count > 0,
+});
+
+/** Reading order: arcs first (e.g. school years), then volume number (4.5 sorts between 4 and 5). */
+export const sortVolumes = <V extends Pick<Volume, "arc_order" | "number">>(volumes: V[]) =>
+  [...volumes].sort((a, b) => a.arc_order - b.arc_order || a.number - b.number);
 
 export type LibraryItem = Book & {
   chapter_count: number;
+  /** Chapters that have text or illustrations (the rest are catalog entries only). */
+  content_count: number;
   last_read_chapter: number;
   current_chapter: number;
+  /** word/image counts per chapter, used for honest progress */
+  chapters: { word_count: number; image_count: number }[];
+  /** the book's cover as shown: manual choice, else the latest imported volume's, else null */
+  cover_src: string | null;
 };
 
 type LibraryRow = Book & {
-  chapters: { count: number }[];
+  volumes: CoverVolume[];
+  chapters: { word_count: number; image_count: number }[];
   reading_progress: Progress | Progress[] | null;
 };
 
@@ -32,16 +52,23 @@ export async function listLibrary(): Promise<LibraryItem[]> {
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("books")
-    .select(`${BOOK_COLS}, chapters(count), reading_progress(last_read_chapter,current_chapter,scroll_pct)`)
+    .select(
+      `${BOOK_COLS}, chapters(word_count,image_count), volumes(imported_at,cover_image_id), reading_progress(last_read_chapter,current_chapter,scroll_pct)`,
+    )
+    .order("is_featured", { ascending: false })
     .order("created_at", { ascending: false })
     .overrideTypes<LibraryRow[], { merge: false }>();
   if (error) throw new Error("Couldn't load your library.");
 
-  return data.map(({ chapters, reading_progress, ...book }) => {
+  return data.map(({ chapters, volumes, reading_progress, ...book }) => {
     const p = Array.isArray(reading_progress) ? reading_progress[0] : reading_progress;
+    const list = chapters ?? [];
     return {
       ...book,
-      chapter_count: chapters?.[0]?.count ?? 0,
+      cover_src: resolveCover(book, volumes ?? []).src,
+      chapters: list,
+      chapter_count: list.length,
+      content_count: list.filter((c) => c.word_count > 0 || c.image_count > 0).length,
       last_read_chapter: p?.last_read_chapter ?? 0,
       current_chapter: p?.current_chapter ?? 1,
     };
@@ -60,15 +87,22 @@ export const getBook = cache(async (id: string): Promise<Book | null> => {
   return data;
 });
 
+export async function getFeaturedBook(): Promise<Book | null> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("books")
+    .select(BOOK_COLS)
+    .eq("is_featured", true)
+    .maybeSingle<Book>();
+  if (error) throw new Error("Couldn't load your featured book.");
+  return data;
+}
+
 export async function getBookStructure(bookId: string) {
   const supabase = await createClient();
   const [volumes, chapters, progress, bookmarks] = await Promise.all([
-    supabase.from("volumes").select("id,number,title").eq("book_id", bookId).order("number"),
-    supabase
-      .from("chapters")
-      .select("id,number,title,volume_id,source_url,word_count")
-      .eq("book_id", bookId)
-      .order("number"),
+    supabase.from("volumes").select(VOLUME_COLS).eq("book_id", bookId),
+    supabase.from("chapters").select(CHAPTER_COLS).eq("book_id", bookId).order("number"),
     supabase
       .from("reading_progress")
       .select("last_read_chapter,current_chapter,scroll_pct")
@@ -86,27 +120,41 @@ export async function getBookStructure(bookId: string) {
   }
 
   return {
-    volumes: (volumes.data ?? []) as Volume[],
-    chapters: (chapters.data ?? []).map((c) => ({
-      ...c,
-      has_content: c.word_count > 0,
-    })) as ChapterSummary[],
+    volumes: sortVolumes((volumes.data ?? []) as Volume[]),
+    chapters: ((chapters.data ?? []) as ChapterRow[]).map(withContentFlag),
     progress: progress.data ?? { last_read_chapter: 0, current_chapter: 1, scroll_pct: 0 },
     bookmarks: (bookmarks.data ?? []) as Bookmark[],
   };
 }
 
-export async function getChapter(bookId: string, number: number): Promise<Chapter | null> {
+export type ChapterImage = { id: string; width: number | null; height: number | null; alt: string | null };
+
+export async function getChapter(
+  bookId: string,
+  number: number,
+): Promise<(Chapter & { images: Record<string, ChapterImage> }) | null> {
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("chapters")
-    .select("id,number,title,volume_id,source_url,word_count,content")
+    .select(`${CHAPTER_COLS},content`)
     .eq("book_id", bookId)
     .eq("number", number)
     .maybeSingle();
   if (error) throw new Error("Couldn't load this chapter.");
   if (!data) return null;
-  return { ...data, has_content: data.word_count > 0 } as Chapter;
+
+  const { data: imgs, error: imgErr } = await supabase
+    .from("book_images")
+    .select("id,width,height,alt")
+    .eq("chapter_id", data.id)
+    .order("position");
+  if (imgErr) throw new Error("Couldn't load this chapter's illustrations.");
+
+  return {
+    ...withContentFlag(data as ChapterRow),
+    content: (data as { content: string | null }).content,
+    images: Object.fromEntries((imgs ?? []).map((i) => [i.id as string, i as ChapterImage])),
+  };
 }
 
 export async function getChat(bookId: string): Promise<ChatMessage[]> {

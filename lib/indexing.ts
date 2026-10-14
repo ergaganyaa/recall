@@ -66,22 +66,27 @@ export async function insertStructure(
 /** Chunk idx values alternate between two ranges so old and new passages can coexist briefly. */
 const IDX_GENERATION = 1_000_000;
 
+export type ChapterBody = {
+  /** Display content (text lines and image markers, in reading order). */
+  content: string;
+  /** Marker-free passages: the ONLY thing that is ever searchable. */
+  chunks: string[];
+  wordCount: number;
+  imageCount: number;
+};
+
 /**
- * Stores chapter text and rebuilds its passage index.
+ * Stores a chapter's content and rebuilds its passage index.
  *
  * New passages are written first (into the idx range the old ones don't use),
  * then the old passages are removed. A failure part-way therefore never leaves
  * the chapter with no searchable passages.
  */
-export async function setChapterContent(
+export async function storeChapterBody(
   supabase: SupabaseClient,
   chapter: { id: string; book_id: string; number: number },
-  rawContent: string,
+  body: ChapterBody,
 ) {
-  const content = cleanText(rawContent);
-  const problem = validateChapterText(content);
-  if (problem) throw new Error(problem);
-
   const { data: existing, error: existingErr } = await supabase
     .from("chunks")
     .select("idx")
@@ -92,7 +97,7 @@ export async function setChapterContent(
   const oldIsHigh = (existing?.length ?? 0) > 0;
   const base = oldIsHigh ? 0 : IDX_GENERATION;
 
-  const rows = chunkText(content).map((text, i) => ({
+  const rows = body.chunks.map((text, i) => ({
     book_id: chapter.book_id,
     chapter_id: chapter.id,
     chapter_number: chapter.number,
@@ -115,7 +120,7 @@ export async function setChapterContent(
 
   const { error: upErr } = await supabase
     .from("chapters")
-    .update({ content, word_count: countWords(content) })
+    .update({ content: body.content, word_count: body.wordCount, image_count: body.imageCount })
     .eq("id", chapter.id);
   if (upErr) {
     await removeNew();
@@ -127,4 +132,21 @@ export async function setChapterContent(
     ? await supabase.from("chunks").delete().eq("chapter_id", chapter.id).gte("idx", IDX_GENERATION)
     : await supabase.from("chunks").delete().eq("chapter_id", chapter.id).lt("idx", IDX_GENERATION);
   if (delErr) throw new Error("Saved, but couldn't clean up the old search index.");
+}
+
+/** Pasted / uploaded plain text (no illustrations). */
+export async function setChapterContent(
+  supabase: SupabaseClient,
+  chapter: { id: string; book_id: string; number: number },
+  rawContent: string,
+) {
+  const content = cleanText(rawContent);
+  const problem = validateChapterText(content);
+  if (problem) throw new Error(problem);
+  await storeChapterBody(supabase, chapter, {
+    content,
+    chunks: chunkText(content),
+    wordCount: countWords(content),
+    imageCount: 0,
+  });
 }

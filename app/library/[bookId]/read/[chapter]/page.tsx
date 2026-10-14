@@ -1,5 +1,7 @@
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
+import { MigrationNotice } from "@/components/migration-notice";
+import { schemaIsCurrent } from "@/lib/schema";
 import { Reader } from "@/components/reader";
 import { SetupNotice } from "@/components/setup-notice";
 import { ReaderSkeleton } from "@/components/skeletons";
@@ -22,6 +24,7 @@ async function ReadContent({ params, searchParams }: Pick<Props, "params" | "sea
   const { bookId, chapter: chapterParam } = await params;
   const { p } = await searchParams;
   await requireUser();
+  if (!(await schemaIsCurrent())) return <MigrationNotice />;
 
   const number = Number(chapterParam);
   if (!Number.isInteger(number) || number < 1) notFound();
@@ -45,6 +48,7 @@ async function ReadContent({ params, searchParams }: Pick<Props, "params" | "sea
       bookTitle={book.title}
       chapter={{ number: chapter.number, title: chapter.title, content: chapter.content }}
       chapters={structure.chapters.map((c) => ({ number: c.number, title: c.title }))}
+      images={chapter.images}
       initialPct={initialPct}
       lastRead={structure.progress.last_read_chapter}
       bookSourceUrl={book.source_url}

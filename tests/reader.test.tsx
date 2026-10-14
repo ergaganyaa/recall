@@ -1,0 +1,235 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { renderToStaticMarkup } from "react-dom/server";
+import { describe, expect, it, vi } from "vitest";
+
+vi.mock("next/navigation", () => ({ useRouter: () => ({ push: () => {} }) }));
+vi.mock("@/app/actions/reading", () => ({
+  saveProgress: async () => ({ ok: true, data: undefined }),
+  markChapterRead: async () => ({ ok: true, data: { lastRead: 0, skippedAhead: false } }),
+  addBookmark: async () => ({ ok: false, error: "unused" }),
+}));
+
+import { ChapterImage } from "@/components/chapter-image";
+import { ChapterPickerPanel, pickerKeyAction } from "@/components/chapter-picker";
+import { Reader } from "@/components/reader";
+import { imageMarker } from "@/lib/chapter-content";
+
+const BOOK = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+const IMG = (n: number) => `0000000${n}-0000-4000-8000-000000000000`;
+const MISSING = "99999999-9999-4999-8999-999999999999";
+
+const chapters = [1, 2, 3, 4, 5].map((n) => ({ number: n, title: `Title of chapter ${n}` }));
+const content = [
+  "Paragraph one.",
+  "Paragraph two.",
+  imageMarker(IMG(1)),
+  "Paragraph three.",
+  imageMarker(IMG(2)),
+  "Paragraph four.",
+  imageMarker(MISSING), // a marker whose picture row is gone
+  "Paragraph five.",
+].join("\n");
+const images = {
+  [IMG(1)]: { id: IMG(1), width: 900, height: 600, alt: "first picture" },
+  [IMG(2)]: { id: IMG(2), width: 600, height: 900, alt: null },
+};
+
+const render = (over: Partial<Parameters<typeof Reader>[0]> = {}) =>
+  renderToStaticMarkup(
+    <Reader
+      bookId={BOOK}
+      bookTitle="The Sample Novel"
+      chapter={{ number: 3, title: "Title of chapter 3", content }}
+      chapters={chapters}
+      images={images}
+      initialPct={0.4}
+      bookSourceUrl={null}
+      lastRead={2}
+      {...over}
+    />,
+  );
+
+describe("reader: back to the book page", () => {
+  const html = render();
+  const back = html.match(/<a[^>]*data-testid="back-to-book"[^>]*>[\s\S]*?<\/a>/)![0];
+
+  it("5. is a visible, labelled link to the CURRENT book's page", () => {
+    expect(back).toContain(`href="/library/${BOOK}"`);
+    expect(back).toContain("Back to book"); // desktop label
+    expect(back).toMatch(/>Book</); // short mobile label
+    expect(back).toContain("The Sample Novel"); // accessible name names the book
+    expect(back).toMatch(/aria-label="Back to the book page: The Sample Novel"/);
+  });
+
+  it("is the first control in the header, in a fixed position", () => {
+    const header = html.slice(html.indexOf("<header"), html.indexOf("</header>"));
+    expect(header.indexOf('data-testid="back-to-book"')).toBeLessThan(header.indexOf("Ch. 3"));
+    expect(header.indexOf('data-testid="back-to-book"')).toBeLessThan(header.indexOf('aria-label="Add bookmark"'));
+  });
+
+  it("is not an arrow and not the previous-chapter control", () => {
+    expect(back).not.toContain("←");
+    expect(back).not.toContain("Previous");
+    expect(html).toContain(`href="/library/${BOOK}/read/2"`); // the real previous-chapter link
+    expect(html).toMatch(/Previous/);
+    expect(back).not.toContain("/read/");
+  });
+
+  it("keeps the other reading controls: bookmark, settings, next chapter", () => {
+    expect(html).toContain('aria-label="Add bookmark"');
+    expect(html).toContain('aria-label="Reader settings"');
+    expect(html).toContain("Next chapter");
+  });
+});
+
+describe("reader: progress is saved when leaving", () => {
+  const source = readFileSync(path.resolve(import.meta.dirname, "../components/reader.tsx"), "utf8");
+
+  it("6. the back-to-book link and the chapter picker both flush the reading position before navigating", () => {
+    const link = source.match(/<Link\s[^>]*?data-testid="back-to-book"[\s\S]*?>/)![0];
+    expect(link).toContain("onClick={flushProgress}");
+    expect(source).toMatch(/onSelect=\{\(n\) => \{\s*flushProgress\(\);/);
+  });
+
+  it("the position is also flushed on tab hide, page hide and when the reader unmounts", () => {
+    expect(source).toContain('document.addEventListener("visibilitychange", onHide)');
+    expect(source).toContain('window.addEventListener("pagehide", onHide)');
+    // the effect's cleanup (runs when leaving the chapter/page) must itself flush, right after unsubscribing
+    expect(source).toMatch(/removeEventListener\("pagehide", onHide\);\s*s\.flush\(\);/);
+  });
+});
+
+describe("reader: chapter selector", () => {
+  const html = render();
+
+  it("is not a native <select> (whose pop-up the browser paints white)", () => {
+    expect(html).not.toContain("<select");
+    expect(html).not.toContain("<option");
+  });
+
+  it("shows the current chapter and is a labelled button that opens a dialog", () => {
+    expect(html).toMatch(/aria-haspopup="dialog"/);
+    expect(html).toContain("Ch. 3 — Title of chapter 3");
+  });
+});
+
+describe("chapter picker panel: themed for light and dark", () => {
+  const panel = renderToStaticMarkup(<ChapterPickerPanel chapters={chapters} current={3} onSelect={() => {}} onClose={() => {}} autoFocus={false} />);
+
+  it("7. uses theme tokens for surface, text, border, hover and selected states", () => {
+    expect(panel).toContain("bg-surface");
+    expect(panel).toContain("text-foreground");
+    expect(panel).toContain("border-border");
+    expect(panel).toContain("hover:bg-accent-soft");
+    expect(panel).toContain("text-muted");
+    expect(panel).toContain("focus-visible:outline-accent");
+  });
+
+  it("marks exactly the current chapter as selected, with the accent style and a check", () => {
+    expect(panel.match(/aria-selected="true"/g)).toHaveLength(1);
+    const selected = panel.match(/<button[^>]*aria-selected="true"[^>]*>[\s\S]*?<\/button>/)![0];
+    expect(selected).toContain("Ch. 3");
+    expect(selected).toContain("bg-accent-soft");
+    expect(selected).toContain("text-accent");
+    expect(selected).toContain("✓");
+  });
+
+  it("lists every chapter as an option inside a labelled listbox", () => {
+    expect(panel).toContain('role="listbox"');
+    expect(panel.match(/role="option"/g)).toHaveLength(5);
+  });
+
+  it("is constrained to the screen so it stays usable on small devices", () => {
+    expect(panel).toContain("w-[min(32rem,calc(100vw-1.5rem))]");
+    expect(panel).toContain("max-h-[60vh]");
+    expect(panel).toContain("overflow-y-auto");
+  });
+});
+
+describe("no hard-coded colours in the reader UI (everything follows the theme)", () => {
+  const files = ["reader.tsx", "chapter-picker.tsx", "chapter-image.tsx"].map((f) => [f, readFileSync(path.resolve(import.meta.dirname, "../components", f), "utf8")]);
+  it.each(files)("%s only uses design tokens", (_name, source) => {
+    expect(source).not.toMatch(/\b(?:bg|text|border|ring|outline|fill|stroke)-(?:white|black|gray|grey|slate|zinc|neutral|stone|red|blue|green|yellow|amber)(?:-\d{2,3})?\b/);
+    expect(source).not.toMatch(/(?:className|style)=[^\n]*#[0-9a-fA-F]{3,8}\b/);
+  });
+});
+
+describe("keyboard focus is visible", () => {
+  // In Tailwind 4, "outline-none" sets the outline STYLE to none, so a "focus-visible:outline-2" on the same
+  // element only changes width/colour and the ring never appears. A visible ring needs outline-solid.
+  const files = ["reader.tsx", "chapter-picker.tsx", "chapter-image.tsx"].map((f) => [f, readFileSync(path.resolve(import.meta.dirname, "../components", f), "utf8")]);
+  it.each(files)("%s never combines outline-none with a focus-visible ring that cannot show", (_name, source) => {
+    for (const m of source.matchAll(/className=(?:"([^"]*)"|{`([^`]*)`})/g)) {
+      const classes = m[1] ?? m[2];
+      if (/(^|s)outline-none(s|$)/.test(classes) && /focus-visible:outline-d/.test(classes)) {
+        expect(classes, "outline-none hides the focus ring").toMatch(/focus-visible:outline-solid/);
+      }
+    }
+  });
+  it("the picker's rows and search box use an explicitly solid focus ring", () => {
+    const panelHtml = renderToStaticMarkup(<ChapterPickerPanel chapters={chapters} current={3} onSelect={() => {}} onClose={() => {}} autoFocus={false} />);
+    expect(panelHtml.match(/focus-visible:outline-solid/g)!.length).toBeGreaterThanOrEqual(6);
+    expect(panelHtml).not.toMatch(/(^|s)outline-none(s|")/);
+  });
+});
+
+describe("picker keyboard behaviour", () => {
+  it("moves with the arrows, clamps at both ends, jumps with Home/End", () => {
+    expect(pickerKeyAction("ArrowDown", 0, 5)).toEqual({ type: "move", index: 1 });
+    expect(pickerKeyAction("ArrowDown", 4, 5)).toEqual({ type: "move", index: 4 });
+    expect(pickerKeyAction("ArrowUp", 0, 5)).toEqual({ type: "move", index: 0 });
+    expect(pickerKeyAction("Home", 3, 5)).toEqual({ type: "move", index: 0 });
+    expect(pickerKeyAction("End", 1, 5)).toEqual({ type: "move", index: 4 });
+  });
+  it("selects with Enter, closes with Escape, ignores other keys and empty lists", () => {
+    expect(pickerKeyAction("Enter", 2, 5)).toEqual({ type: "select", index: 2 });
+    expect(pickerKeyAction("Enter", 0, 0)).toBeNull();
+    expect(pickerKeyAction("Escape", 2, 5)).toEqual({ type: "close" });
+    expect(pickerKeyAction("a", 2, 5)).toBeNull();
+    expect(pickerKeyAction("ArrowLeft", 2, 5)).toBeNull(); // left/right stay chapter navigation
+  });
+});
+
+describe("reader: illustrations inline", () => {
+  const html = render();
+  const body = html.slice(html.indexOf("<article"));
+
+  it("1. renders text and pictures in the original order", () => {
+    const order = [...body.matchAll(/Paragraph (one|two|three|four|five)\.|<img[^>]*src="([^"]+)"|This illustration is missing/g)].map((m) => m[1] ?? m[2] ?? "missing");
+    expect(order).toEqual([
+      "one",
+      "two",
+      `/library/${BOOK}/image/${IMG(1)}`,
+      "three",
+      `/library/${BOOK}/image/${IMG(2)}`,
+      "four",
+      "missing",
+      "five",
+    ]);
+  });
+
+  it("keeps each picture's proportions: intrinsic size + aspect ratio, never cropped or stretched", () => {
+    const first = body.match(/<img[^>]*first picture[^>]*>/)![0];
+    expect(first).toContain('width="900"');
+    expect(first).toContain('height="600"');
+    expect(first).toContain("aspect-ratio:900 / 600");
+    expect(first).toContain("object-contain");
+    expect(first).toContain("max-w-full");
+    expect(first).toContain("h-auto");
+    expect(first).not.toContain("object-cover");
+  });
+
+  it("4. never drops a picture silently: a missing one is a visible placeholder", () => {
+    expect(body).toContain("This illustration is missing from your library.");
+    expect(body).toContain("Re-import this volume to restore it.");
+  });
+
+  it("a picture that fails to load gets a retry placeholder (component contract)", () => {
+    const missing = renderToStaticMarkup(<ChapterImage src={null} alt="x" width={100} height={50} />);
+    expect(missing).toContain("missing from your library");
+    const ok = renderToStaticMarkup(<ChapterImage src="/a.png" alt="x" width={100} height={50} />);
+    expect(ok).toContain('src="/a.png"');
+    expect(ok).toContain('loading="lazy"');
+  });
+});
