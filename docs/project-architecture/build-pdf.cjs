@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-require-imports -- standalone CommonJS script, not part of the app */
 /*
  * Builds CSS447_Project_Architecture.pdf from CSS447_Project_Architecture.md.
  * Not part of the application: run it manually when the report changes.
