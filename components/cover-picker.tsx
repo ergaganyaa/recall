@@ -69,7 +69,7 @@ export function CoverPicker({
     <fieldset disabled={disabled} className="space-y-3">
       <legend className="text-sm font-medium">Volume cover</legend>
       <p className="text-xs text-muted">
-        Used in the volume browser, and as the book&apos;s cover while this is your most recently imported volume. It is separate
+        Shown in the volume cover browser, and as the book&apos;s cover in your library while you are reading this volume. It is separate
         from the pictures inside the chapters.
       </p>
       <div className="flex flex-wrap gap-3">

@@ -17,6 +17,8 @@ export const STATUS_LABELS: Record<BookStatus, string> = {
 
 export type Book = {
   id: string;
+  /** readable address: /library/<slug> (unique per user, permanent) */
+  slug: string;
   title: string;
   author: string | null;
   description: string | null;

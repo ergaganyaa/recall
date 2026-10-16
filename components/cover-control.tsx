@@ -15,13 +15,13 @@ export function CoverControl({ bookId, source }: { bookId: string; source: Cover
   if (source !== "manual") {
     return (
       <span className="text-xs text-muted">
-        {source === "volume" ? "Cover: latest imported volume (automatic)" : "Cover: linked image"}
+        {source === "volume" ? "Library cover: the volume you are reading (automatic)" : "Library cover: linked image"}
       </span>
     );
   }
   return (
     <span className="text-xs text-muted">
-      Cover: pinned by you ·{" "}
+      Library cover: pinned by you ·{" "}
       <button
         type="button"
         disabled={pending}

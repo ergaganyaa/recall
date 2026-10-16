@@ -12,6 +12,7 @@ import { AssistantChat, type ChatContext } from "./assistant-chat";
 import { ChapterImage } from "./chapter-image";
 import { ChapterPicker } from "./chapter-picker";
 import { useScrollBoundary } from "./use-block-tracking";
+import { bookPath } from "@/lib/book-slug";
 
 
 type Prefs = { size: number; font: "serif" | "sans"; wide: boolean };
@@ -71,9 +72,11 @@ export type ReaderChatProps = { initialMessages: ChatMessage[]; configured: bool
 export function Reader(props: {
   bookId: string;
   bookTitle: string;
+  /** the book's address name: links are /library/<bookSlug>/... */
+  bookSlug: string;
   chapter: { number: number; title: string; content: string | null; rev: number };
   /** Illustrations of this chapter by id. Markers that aren't listed here are ignored. */
-  images: Record<string, { id: string; width: number | null; height: number | null; alt: string | null }>;
+  images: Record<string, { id: string; width: number | null; height: number | null; alt: string | null; ext?: string }>;
   chapters: ChapterRef[];
   initialPct: number;
   bookSourceUrl: string | null;
@@ -92,6 +95,7 @@ export function Reader(props: {
   volumeLabel: string | null;
   chat: ReaderChatProps;
 }) {
+  const base = bookPath({ slug: props.bookSlug }); // the book's readable address
   const { bookId, bookTitle, chapter, chapters, initialPct, bookSourceUrl, images, focusBlock, visit, resumeChapter } = props;
   const [boundary, setBoundary] = useState(props.lastRead);
   const router = useRouter();
@@ -109,7 +113,10 @@ export function Reader(props: {
   const blocks = useMemo(() => toBlocks(chapter.content ?? ""), [chapter.content]);
   const lastBlock = blocks.length - 1;
 
-  const [pct, setPct] = useState(initialPct);
+  // The progress bar is updated straight in the DOM: a state update on every scroll event would re-render the
+  // whole chapter (hundreds of paragraphs) many times a second.
+  const barRef = useRef<HTMLDivElement>(null);
+  const [navigating, setNavigating] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [highlight, setHighlight] = useState<number | null>(focusBlock);
   const [canGoBack, setCanGoBack] = useState(false);
@@ -128,6 +135,7 @@ export function Reader(props: {
 
   const finishChapter = useCallback(async () => {
     if (visit || finished.current) return;
+    if (boundary >= chapter.number) return; // already finished earlier: nothing to save (and no network wait)
     finished.current = true;
     const res = await markChapterRead(bookId, chapter.number, "advance");
     if (!res.ok) {
@@ -139,7 +147,7 @@ export function Reader(props: {
     if (res.data.skippedAhead) {
       flash(`Spoiler protection stays at chapter ${res.data.lastRead}: earlier chapters aren't marked read.`);
     }
-  }, [bookId, chapter.number, flash, visit]);
+  }, [bookId, chapter.number, flash, visit, boundary]);
 
   // ----- reading boundary: everything above the top of the screen is read, the rest is not -----
   const trackingEnabled = !visit && !!chapter.content && chapter.number === boundary + 1;
@@ -262,7 +270,7 @@ export function Reader(props: {
     function onScroll() {
       const max = document.documentElement.scrollHeight - window.innerHeight;
       const p = max > 0 ? Math.min(1, Math.max(0, window.scrollY / max)) : 1;
-      setPct(p);
+      if (barRef.current) barRef.current.style.width = `${p * 100}%`;
       // Right after a citation jump the resume position stays where the reader WAS until they scroll by themselves.
       if (trackingRef.current?.hasUserMovedSinceJump() !== false) s.update(p);
     }
@@ -290,8 +298,8 @@ export function Reader(props: {
         return;
       }
       if (t.closest("input, select, textarea, [role='dialog'], [role='listbox']") || e.metaKey || e.ctrlKey || e.altKey) return;
-      if (e.key === "ArrowLeft" && prev) router.push(`/library/${bookId}/read/${prev.number}`);
-      if (e.key === "ArrowRight" && next) router.push(`/library/${bookId}/read/${next.number}`);
+      if (e.key === "ArrowLeft" && prev) router.push(`${base}/read/${prev.number}`);
+      if (e.key === "ArrowRight" && next) router.push(`${base}/read/${next.number}`);
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -304,10 +312,28 @@ export function Reader(props: {
   }
 
   async function goNext() {
-    if (!next) return;
-    await finishChapter();
-    router.push(`/library/${bookId}/read/${next.number}`);
+    if (!next || navigating) return;
+    setNavigating(true); // immediate feedback; the button cannot be double-clicked
+    const t0 = performance.now();
+    // The next page reads your progress, so the "finished" write has to land first; start loading its shell meanwhile.
+    router.prefetch(`${base}/read/${next.number}`);
+    try {
+      await finishChapter();
+    } catch {
+      // Network failure: say so, and do not move on as if your progress had been saved.
+      flash("Couldn't save your progress. Check your connection and try again.");
+      setNavigating(false);
+      return;
+    }
+    if (process.env.NEXT_PUBLIC_RECALL_TIMING === "1") console.log(`[timing] next: click to navigate ${(performance.now() - t0).toFixed(0)} ms`);
+    router.push(`${base}/read/${next.number}`);
   }
+
+  // Warm up the neighbouring chapters (the page shell only; their data is fetched when you open them).
+  useEffect(() => {
+    if (next) router.prefetch(`${base}/read/${next.number}`);
+    if (prev) router.prefetch(`${base}/read/${prev.number}`);
+  }, [router, base, next, prev]);
 
   const button =
     "grid h-10 min-w-10 place-items-center rounded-full border border-border px-3 text-sm text-muted transition hover:text-foreground disabled:opacity-40";
@@ -330,7 +356,7 @@ export function Reader(props: {
       <header className="sticky top-0 z-20 border-b border-border bg-background/90 backdrop-blur">
         <div className="mx-auto flex h-14 max-w-4xl items-center gap-2 px-3 sm:px-4">
           <Link
-            href={`/library/${bookId}`}
+            href={base}
             onClick={flushProgress}
             aria-label={`Back to the book page: ${bookTitle}`}
             title="Back to the book page (volumes and chapters). Your place is saved."
@@ -351,7 +377,7 @@ export function Reader(props: {
               current={chapter.number}
               onSelect={(n) => {
                 flushProgress();
-                router.push(`/library/${bookId}/read/${n}`);
+                router.push(`${base}/read/${n}`);
               }}
             />
           </div>
@@ -386,7 +412,7 @@ export function Reader(props: {
           </button>
         </div>
         <div className="h-0.5 bg-border" aria-hidden>
-          <div className="h-full bg-accent transition-[width]" style={{ width: `${pct * 100}%` }} />
+          <div ref={barRef} className="h-full bg-accent" style={{ width: `${initialPct * 100}%` }} />
         </div>
 
         {showSettings && (
@@ -431,7 +457,7 @@ export function Reader(props: {
         <div className="mx-auto max-w-xl px-5 pt-6" style={{ fontFamily: "var(--font-geist-sans), system-ui, sans-serif" }} data-testid="visit-banner">
           <div className="rounded-2xl bg-accent-soft px-4 py-3 text-sm">
             <p>Viewing a passage the assistant cited. Your reading position is unchanged.</p>
-            <Link href={`/library/${bookId}/read/${resumeChapter}`} className="mt-2 inline-block font-medium text-accent hover:underline" data-testid="visit-back">
+            <Link href={`${base}/read/${resumeChapter}`} className="mt-2 inline-block font-medium text-accent hover:underline" data-testid="visit-back">
               ← Back to where you were reading (chapter {resumeChapter})
             </Link>
           </div>
@@ -484,7 +510,7 @@ export function Reader(props: {
                       return (
                         <figure key={`b${i}`} data-block={i} id={`block-${i}`} className={`my-[1.5em] scroll-mt-24 ${litClass}`}>
                           <ChapterImage
-                            src={img ? imageUrl(bookId, img.id) : null}
+                            src={img ? imageUrl(bookId, img.id, img.ext) : null}
                             alt={img?.alt ?? null}
                             width={img?.width ?? null}
                             height={img?.height ?? null}
@@ -505,7 +531,7 @@ export function Reader(props: {
                 progress in sync.
               </p>
               <div className="mt-4 flex flex-wrap justify-center gap-2">
-                <Link href={`/library/${bookId}`} className="rounded-full border border-border px-4 py-2 text-sm hover:bg-accent-soft">
+                <Link href={base} className="rounded-full border border-border px-4 py-2 text-sm hover:bg-accent-soft">
                   Add text
                 </Link>
                 {bookSourceUrl && (
@@ -534,15 +560,21 @@ export function Reader(props: {
             aria-label="Chapter navigation"
           >
             {prev ? (
-              <Link href={`/library/${bookId}/read/${prev.number}`} className={button}>
+              <Link href={`${base}/read/${prev.number}`} className={button}>
                 ← Previous
               </Link>
             ) : (
               <span />
             )}
             {next ? (
-              <button type="button" onClick={goNext} className="rounded-full bg-accent px-5 py-2.5 font-medium text-accent-foreground hover:opacity-90">
-                Next chapter →
+              <button
+                type="button"
+                onClick={goNext}
+                disabled={navigating}
+                aria-busy={navigating}
+                className="rounded-full bg-accent px-5 py-2.5 font-medium text-accent-foreground hover:opacity-90 disabled:opacity-70"
+              >
+                {navigating ? "Opening…" : "Next chapter →"}
               </button>
             ) : boundary >= chapter.number ? (
               <button type="button" onClick={() => setChatOpen(true)} className="rounded-full bg-accent px-5 py-2.5 font-medium text-accent-foreground">

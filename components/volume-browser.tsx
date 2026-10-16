@@ -26,13 +26,13 @@ function statusOf(s: Stat): { label: string; tone: string } {
  * listed, so the layout stays tidy when just some volumes have been imported.
  */
 export function VolumeBrowser({
-  bookId,
+  basePath,
   volumes,
   chapters,
   lastRead,
   current,
 }: {
-  bookId: string;
+  basePath: string;
   volumes: Volume[];
   chapters: ChapterSummary[];
   lastRead: number;
@@ -62,7 +62,7 @@ export function VolumeBrowser({
     arc.items.push(s);
   }
 
-  const importHref = `/library/${bookId}/import`;
+  const importHref = `${basePath}/import`;
 
   if (stats.length === 0) {
     return (
@@ -92,7 +92,7 @@ export function VolumeBrowser({
               return (
                 <li key={s.volume.id}>
                   <Link
-                    href={first ? `/library/${bookId}/read/${first.number}` : importHref}
+                    href={first ? `${basePath}/read/${first.number}` : importHref}
                     className={`flex h-full flex-col rounded-2xl border bg-surface p-4 transition hover:-translate-y-0.5 hover:shadow-md ${
                       s.isCurrent ? "border-accent ring-1 ring-accent" : "border-border"
                     }`}

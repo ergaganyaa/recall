@@ -22,6 +22,8 @@ import { Reader } from "@/components/reader";
 import { imageMarker } from "@/lib/chapter-content";
 
 const BOOK = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+// The book's readable address: its name plus the first 8 characters of its id.
+const BASE = "/library/the-sample-novel";
 const IMG = (n: number) => `0000000${n}-0000-4000-8000-000000000000`;
 const MISSING = "99999999-9999-4999-8999-999999999999";
 
@@ -46,6 +48,7 @@ const render = (over: Partial<Parameters<typeof Reader>[0]> = {}) =>
     <Reader
       bookId={BOOK}
       bookTitle="The Sample Novel"
+      bookSlug="the-sample-novel"
       chapter={{ number: 3, title: "Title of chapter 3", content, rev: 1 }}
       chapters={chapters}
       images={images}
@@ -68,7 +71,7 @@ describe("reader: back to the book page", () => {
   const back = html.match(/<a[^>]*data-testid="back-to-book"[^>]*>[\s\S]*?<\/a>/)![0];
 
   it("5. is a visible, labelled link to the CURRENT book's page", () => {
-    expect(back).toContain(`href="/library/${BOOK}"`);
+    expect(back).toContain(`href="${BASE}"`);
     expect(back).toContain("Back to book"); // desktop label
     expect(back).toMatch(/>Book</); // short mobile label
     expect(back).toContain("The Sample Novel"); // accessible name names the book
@@ -84,7 +87,7 @@ describe("reader: back to the book page", () => {
   it("is not an arrow and not the previous-chapter control", () => {
     expect(back).not.toContain("←");
     expect(back).not.toContain("Previous");
-    expect(html).toContain(`href="/library/${BOOK}/read/2"`); // the real previous-chapter link
+    expect(html).toContain(`href="${BASE}/read/2"`); // the real previous-chapter link
     expect(html).toMatch(/Previous/);
     expect(back).not.toContain("/read/");
   });
@@ -273,7 +276,7 @@ describe("reader: in-reader chat and reading position", () => {
   it("a citation visit explains itself, links back, and tracks nothing", () => {
     const html = render({ visit: true, resumeChapter: 5, focusBlock: 2 });
     expect(html).toContain('data-testid="visit-banner"');
-    expect(html).toContain(`href="/library/${BOOK}/read/5"`);
+    expect(html).toContain(`href="${BASE}/read/5"`);
     expect(render()).not.toContain('data-testid="visit-banner"');
   });
 
@@ -284,5 +287,27 @@ describe("reader: in-reader chat and reading position", () => {
     expect(source).toContain("if (visit || finished.current) return;");
     expect(source).toContain("const settle = window.setTimeout(release"); // only after the saved scroll position is restored
     expect(source).toContain("Your question was not sent.");
+  });
+});
+
+describe("reader: performance-related behaviour", () => {
+  it("illustration URLs carry the file type so the route can skip a database lookup", () => {
+    const html = render({ images: { [IMG(1)]: { id: IMG(1), width: 900, height: 600, alt: "first picture", ext: "jpg" } } });
+    expect(html).toContain(`src="/library/${BOOK}/image/${IMG(1)}?e=jpg"`);
+    expect(render()).toContain(`src="/library/${BOOK}/image/${IMG(1)}"`); // no hint: unchanged URL
+  });
+
+  it("scrolling does not re-render the chapter: the progress bar is written straight to the DOM", () => {
+    const source = readFileSync(path.resolve(import.meta.dirname, "../components/reader.tsx"), "utf8");
+    expect(source).not.toContain("setPct");
+    expect(source).toContain("barRef.current.style.width");
+  });
+
+  it("Next chapter shows feedback at once, cannot be double-clicked, and re-enables on a failed save", () => {
+    const source = readFileSync(path.resolve(import.meta.dirname, "../components/reader.tsx"), "utf8");
+    expect(source).toContain("disabled={navigating}");
+    expect(source).toContain('"Opening…"');
+    expect(source).toContain("setNavigating(false)");
+    expect(source).toContain("if (boundary >= chapter.number) return;"); // re-reading a finished chapter waits for no network call
   });
 });

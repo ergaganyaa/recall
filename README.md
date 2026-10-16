@@ -59,7 +59,7 @@ Checks: `npm run lint`, `npx tsc --noEmit`, `npm test`, `npm run build`.
 
 **PDF** (parsed in your browser with pdf.js): text is rebuilt in reading order (running headers and page numbers dropped); chapters come from the PDF's bookmarks, else detected headings, else the whole file as one chapter, and you can rename, merge, split at a page, or take everything as one chapter before saving. Pictures between paragraphs are cropped from the rendered page and kept in place with their aspect ratio; picture-only pages are kept as page images. **Scanned PDFs (no selectable text) are detected and explained; Recall has no OCR**, so they can only be imported as page images (readable, not searchable) unless you run OCR first. Encrypted, damaged, blank, very large (>150 MB or >1500 pages) files get a clear message.
 
-**Covers:** each imported volume gets its own cover (the first meaningful picture, else a rendered first page; you can pick another or upload your own in the preview). The book shows a cover you pinned yourself; otherwise the cover of the most recently *successfully imported* volume that has one. A failed or cancelled import never changes it.
+**Covers:** each imported volume gets its own cover (the first meaningful picture, else a rendered first page; you can pick another or upload your own in the preview). In your library and on Home, a book shows the cover you pinned yourself; otherwise the cover of **the volume you are reading** (from your own saved reading position, per account), falling back to the nearest volume that has a cover (an earlier one wins a tie), then to a linked cover image, then to a generated placeholder. With no progress yet it is the first volume. A failed or cancelled import never supplies a cover. The book page shows the cover of the volume you are reading; **click it to open the covers full screen** and swipe (or use the arrows, number chips or left/right keys) through every volume. It only browses: it never changes your progress, and its button links to the right chapter of the selected volume (your saved chapter for the volume you are reading, the next unfinished chapter for a partly read one, the first chapter otherwise).
 
 Open a book → **Import a volume**. Pick one PDF or EPUB (a whole volume) or one or more .txt/.md files. The file is read in your browser; you review what was found, then it is saved to your private account.
 
@@ -71,3 +71,14 @@ Open a book → **Import a volume**. Pick one PDF or EPUB (a whole volume) or on
 ## Importing novels
 
 Only public book-page metadata is requested from Ranobelib (host allowlist, no redirects off-site, 8s timeout, 1.5 MB cap). Chapter pages are never fetched: Ranobelib's `robots.txt` disallows them. Chapter text comes from local files or paste, never from the site: paste or `.txt`/`.md` upload (UTF-8, UTF-16 and Windows-1251 are detected; Markdown is flattened to plain text). If the importer finds nothing, the link is kept and every field is editable. Chapter lists can be pasted in bulk: `# Volume 2` (or `Volume 2: Title`) starts a volume, every other line is a chapter title.
+
+## Performance notes
+
+Almost all of the time in Recall goes to **network round trips to Supabase** (about 0.35–0.45 s each when the project is in a distant region), so the code is organised to keep them few and parallel: the session is verified locally (`getClaims`, no Auth-server call), the reader loads everything in one parallel round, illustrations are fetched with one Storage call, and imports save 3 chapters and 4 pictures at a time.
+
+- `RECALL_TIMING=1 npm run dev` logs server stage timings; `NEXT_PUBLIC_RECALL_TIMING=1` adds browser-side timings (Next chapter, import parse/upload). They log labels and durations only.
+- `RECALL_BENCH=1 npx vitest run tests/perf.bench.test.ts` runs the real server code against a stub Supabase client that sleeps `RECALL_RTT` ms (default 380) per call, and prints round-trip counts and wall time. It measures code structure, not your database's speed.
+
+## Readable book addresses
+
+Books live at `/library/<slug>` (for example `/library/classroom-of-the-elite`). Run `supabase/migrations/0008_book_slugs.sql` after 0007: it adds `books.slug` (unique per user, set by a trigger from the title when a book is created, filled in for existing books, permanent even if the title changes). Repeated titles get `-2`, `-3`; `add` is reserved because `/library/add` is the add-a-book page. Older `/library/<id>` links, bookmarks and saved citations still work and redirect to the slug. Until the migration is run, the app shows its "database is out of date" notice.

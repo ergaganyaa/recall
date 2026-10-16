@@ -7,6 +7,7 @@ import { FEATURED_SERIES } from "@/lib/featured";
 import { summarizeProgress } from "@/lib/progress-display";
 import type { Book, ChapterSummary, Progress, Volume } from "@/lib/types";
 import { STATUS_LABELS } from "@/lib/types";
+import { bookPath } from "@/lib/book-slug";
 
 /** Home page hero for the user's featured book, followed by its volume browser. */
 export function FeaturedHero({
@@ -25,7 +26,7 @@ export function FeaturedHero({
   const currentVolume = currentChapter ? volumes.find((v) => v.id === currentChapter.volume_id) : undefined;
   const lastFinished = chapters.find((c) => c.number === Math.min(progress.last_read_chapter, chapters.length));
   const started = progress.last_read_chapter > 0 || progress.scroll_pct > 0.02 || progress.current_chapter > 1;
-  const importHref = `/library/${book.id}/import`;
+  const importHref = `${bookPath(book)}/import`;
   const altTitle = book.title === FEATURED_SERIES.title ? FEATURED_SERIES.altTitle : null;
 
   return (
@@ -40,7 +41,7 @@ export function FeaturedHero({
           aria-hidden
         />
         <div className="mx-auto grid max-w-6xl gap-8 px-4 py-10 sm:px-6 sm:py-16 md:grid-cols-[15rem_1fr] md:items-center">
-          <BookCover title={book.title} author={book.author} coverUrl={resolveCover(book, volumes).src} className="mx-auto w-44 md:w-full" />
+          <BookCover title={book.title} author={book.author} coverUrl={resolveCover(book, volumes, { chapters, currentChapter: progress.current_chapter }).src} className="mx-auto w-44 md:w-full" />
 
           <div>
             <p className="text-xs font-medium uppercase tracking-[0.2em] text-accent">Featured · {STATUS_LABELS[book.status]}</p>
@@ -72,12 +73,12 @@ export function FeaturedHero({
                 )}
                 <div className="mt-4 flex flex-wrap gap-2">
                   <Link
-                    href={`/library/${book.id}/read/${currentChapter?.number ?? 1}`}
+                    href={`${bookPath(book)}/read/${currentChapter?.number ?? 1}`}
                     className="rounded-full bg-accent px-6 py-3 text-sm font-medium text-accent-foreground transition hover:opacity-90"
                   >
                     {started ? "Continue reading" : "Start reading"}
                   </Link>
-                  <Link href={`/library/${book.id}#assistant`} className="rounded-full border border-border px-5 py-3 text-sm font-medium transition hover:bg-accent-soft">
+                  <Link href={`${bookPath(book)}#assistant`} className="rounded-full border border-border px-5 py-3 text-sm font-medium transition hover:bg-accent-soft">
                     Ask about the story
                   </Link>
                 </div>
@@ -105,11 +106,11 @@ export function FeaturedHero({
             </h2>
             <p className="mt-1 text-sm text-muted">Only imported volumes are listed. They appear in reading order, including side volumes like 4.5.</p>
           </div>
-          <Link href={`/library/${book.id}`} className="text-sm font-medium text-accent hover:underline">
+          <Link href={bookPath(book)} className="text-sm font-medium text-accent hover:underline">
             Open full book page →
           </Link>
         </div>
-        <VolumeBrowser bookId={book.id} volumes={volumes} chapters={chapters} lastRead={progress.last_read_chapter} current={progress.current_chapter} />
+        <VolumeBrowser basePath={bookPath(book)} volumes={volumes} chapters={chapters} lastRead={progress.last_read_chapter} current={progress.current_chapter} />
       </section>
     </>
   );

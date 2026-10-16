@@ -12,12 +12,15 @@ type Group = { key: string; volume: Volume | null; label: string; chapters: Chap
 
 export function ChapterList({
   bookId,
+  basePath,
   volumes,
   chapters,
   lastRead,
   current,
 }: {
   bookId: string;
+  /** the book's readable address, e.g. /library/the-name-3f9a2c1d */
+  basePath: string;
   volumes: Volume[];
   chapters: ChapterSummary[];
   lastRead: number;
@@ -148,7 +151,7 @@ export function ChapterList({
                     const kind = contentKind(c);
                     return (
                       <li key={c.id} className={`flex items-center gap-2 px-4 py-2 text-sm sm:px-5 ${isLast ? "bg-accent-soft" : ""}`}>
-                        <Link href={`/library/${bookId}/read/${c.number}`} className="flex min-w-0 flex-1 items-center gap-3 py-1.5">
+                        <Link href={`${basePath}/read/${c.number}`} className="flex min-w-0 flex-1 items-center gap-3 py-1.5">
                           <span
                             className={`grid size-6 shrink-0 place-items-center rounded-full text-xs ${
                               isRead ? "bg-accent text-accent-foreground" : "border border-border text-muted"

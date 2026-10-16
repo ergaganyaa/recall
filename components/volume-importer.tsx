@@ -22,6 +22,7 @@ import { MAX_UPLOAD_BYTES, prepareTextFile } from "@/lib/text-file";
 import { chaptersFromTextSources } from "@/lib/text-import";
 import { ChapterEditor, type EditableStructure } from "./chapter-editor";
 import { CoverPicker, type CoverChoice } from "./cover-picker";
+import { bookPath } from "@/lib/book-slug";
 
 type ExistingVolume = { number: number; arc: string | null; arc_order: number; title: string | null };
 
@@ -46,14 +47,21 @@ const BUCKET = "book-images";
 const inputCls =
   "mt-1 w-full rounded-xl border border-border bg-background px-3 py-2 text-sm outline-none focus:border-accent";
 
+/** Opt-in (NEXT_PUBLIC_RECALL_TIMING=1): logs how long a stage took in the browser console. */
+function timing(label: string, since: number) {
+  if (process.env.NEXT_PUBLIC_RECALL_TIMING === "1") console.log(`[timing] ${label} ${(performance.now() - since).toFixed(0)} ms`);
+}
+
 export function VolumeImporter({
   bookId,
   bookTitle,
+  bookSlug,
   hasManualCover,
   existing,
 }: {
   bookId: string;
   bookTitle: string;
+  bookSlug: string;
   hasManualCover: boolean;
   existing: ExistingVolume[];
 }) {
@@ -187,7 +195,9 @@ export function VolumeImporter({
         if (files.length > 1) throw new Error("Choose either one EPUB file or several text files, not both.");
         const f = epubs[0];
         if (f.size > EPUB_MAX_BYTES) throw new Error(`“${f.name}” is ${(f.size / 1e6).toFixed(0)} MB; the limit is ${EPUB_MAX_BYTES / 1e6} MB.`);
+        const tParse = performance.now();
         const v = parseEpub(new Uint8Array(await f.arrayBuffer()));
+        timing(`import: read + parse EPUB (${v.chapters.length} chapters, ${v.images.size} images)`, tParse);
         adopt(
           {
             kind: "epub",
@@ -315,7 +325,9 @@ export function VolumeImporter({
       signal: abort.current.signal,
     };
     try {
+      const tRun = performance.now();
       const res = await runVolumeImport(input);
+      timing(`import: upload + save (${input.chapters.length} chapters), status ${res.status}`, tRun);
       if (res.status === "done" || res.status === "incomplete") runRef.current = { input, state: res.state };
       setResult(res);
     } finally {
@@ -368,7 +380,7 @@ export function VolumeImporter({
           <p key={w} className="rounded-xl bg-danger/10 px-3 py-2 text-sm text-danger">{w}</p>
         ))}
         <div className="flex flex-wrap gap-2">
-          <Link href={`/library/${bookId}`} className="rounded-full bg-accent px-5 py-2.5 text-sm font-medium text-accent-foreground">
+          <Link href={bookPath({ slug: bookSlug })} className="rounded-full bg-accent px-5 py-2.5 text-sm font-medium text-accent-foreground">
             Open {bookTitle}
           </Link>
           <Link href="/" className="rounded-full border border-border px-5 py-2.5 text-sm hover:bg-accent-soft">
@@ -550,7 +562,7 @@ export function VolumeImporter({
               {coverImage && (
                 <label className="flex items-center gap-2 text-xs">
                   <input type="checkbox" checked={setAsBookCover} onChange={(e) => setSetAsBookCover(e.target.checked)} className="size-4" />
-                  Also pin this as the book&apos;s cover{hasManualCover ? " (replaces the cover you chose before)" : " (otherwise the latest imported volume’s cover is used automatically)"}
+                  Also pin this as the book&apos;s cover{hasManualCover ? " (replaces the cover you chose before)" : " (otherwise the cover of the volume you are reading is used automatically)"}
                 </label>
               )}
             </div>

@@ -123,8 +123,9 @@ export function prepareChapter(
   };
 }
 
-/** Where a stored image is served from (see app/library/[bookId]/image/[imageId]/route.ts). */
-export const imageUrl = (bookId: string, imageId: string) => `/library/${bookId}/image/${imageId}`;
+/** Where a stored image is served from (the optional file extension lets the route skip a database lookup) (see app/library/[bookId]/image/[imageId]/route.ts). */
+export const imageUrl = (bookId: string, imageId: string, ext?: string | null) =>
+  `/library/${bookId}/image/${imageId}${ext ? `?e=${ext}` : ""}`;
 
 /** A book's cover: an uploaded/EPUB cover when present, else a linked cover URL. */
 export function coverSrc(book: { id: string; cover_image_id: string | null; cover_url: string | null }): string | null {

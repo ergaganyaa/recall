@@ -6,7 +6,7 @@ import { useTransition } from "react";
 import { deleteBookmark } from "@/app/actions/reading";
 import type { Bookmark } from "@/lib/types";
 
-export function BookmarksList({ bookId, bookmarks }: { bookId: string; bookmarks: Bookmark[] }) {
+export function BookmarksList({ basePath, bookmarks }: { basePath: string; bookmarks: Bookmark[] }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
 
@@ -20,7 +20,7 @@ export function BookmarksList({ bookId, bookmarks }: { bookId: string; bookmarks
           {bookmarks.map((b) => (
             <li key={b.id} className="flex items-center justify-between gap-3 py-2 text-sm">
               <Link
-                href={`/library/${bookId}/read/${b.chapter_number}?p=${b.scroll_pct.toFixed(3)}`}
+                href={`${basePath}/read/${b.chapter_number}?p=${b.scroll_pct.toFixed(3)}`}
                 className="min-w-0 flex-1 hover:text-accent"
               >
                 <span className="block font-medium">

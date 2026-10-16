@@ -9,6 +9,7 @@ import type { LibraryItem } from "@/lib/queries";
 import { BOOK_STATUSES, STATUS_LABELS, type BookStatus } from "@/lib/types";
 import { BookCover } from "./book-cover";
 import { ProgressBar } from "./progress-bar";
+import { bookPath } from "@/lib/book-slug";
 
 export function BookCard({ book }: { book: LibraryItem }) {
   const router = useRouter();
@@ -33,7 +34,7 @@ export function BookCard({ book }: { book: LibraryItem }) {
         pending ? "opacity-60" : "hover:shadow-md"
       }`}
     >
-      <Link href={`/library/${book.id}`} className="group flex flex-col gap-3">
+      <Link href={bookPath(book)} className="group flex flex-col gap-3">
         <BookCover title={book.title} author={book.author} coverUrl={book.cover_src} />
         <div className="px-1">
           <h3 className="line-clamp-2 font-semibold leading-snug group-hover:text-accent">{book.title}</h3>

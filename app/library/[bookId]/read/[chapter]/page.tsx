@@ -1,15 +1,15 @@
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { Suspense } from "react";
 import { MigrationNotice } from "@/components/migration-notice";
-import { schemaIsCurrent } from "@/lib/schema";
 import { Reader } from "@/components/reader";
 import { SetupNotice } from "@/components/setup-notice";
 import { ReaderSkeleton } from "@/components/skeletons";
-import { requireUser } from "@/lib/auth";
 import { readAssistantConfig } from "@/lib/assistant/config";
 import { comparePositions } from "@/lib/assistant/history";
 import { formatVolume } from "@/lib/assistant/prompt";
-import { getBook, getBookStructure, getChapter, getChat } from "@/lib/queries";
+import { bookPath, canonicalSuffix, isCanonicalParam } from "@/lib/book-slug";
+import { forgetBook } from "@/lib/queries";
+import { loadReaderData } from "@/lib/reader-data";
 import { isSupabaseConfigured } from "@/lib/supabase/config";
 
 type Props = PageProps<"/library/[bookId]/read/[chapter]">;
@@ -24,23 +24,21 @@ export default function ReadPage({ params, searchParams }: Props) {
 }
 
 async function ReadContent({ params, searchParams }: Pick<Props, "params" | "searchParams">) {
-  const { bookId, chapter: chapterParam } = await params;
-  const { p, block: blockParam, cite } = await searchParams;
-  await requireUser();
-  if (!(await schemaIsCurrent())) return <MigrationNotice />;
-
+  const { bookId: bookParam, chapter: chapterParam } = await params;
+  const search = await searchParams;
+  const { p, block: blockParam, cite } = search;
   const number = Number(chapterParam);
   if (!Number.isInteger(number) || number < 1) notFound();
 
-  const book = await getBook(bookId);
-  if (!book) notFound();
-
-  const [chapter, structure, messages] = await Promise.all([
-    getChapter(book.id, number),
-    getBookStructure(book.id),
-    getChat(book.id),
-  ]);
-  if (!chapter) notFound();
+  const data = await loadReaderData(bookParam, number);
+  if (data.kind === "migrate") return <MigrationNotice />;
+  if (data.kind === "missing") {
+    await forgetBook(bookParam);
+    notFound();
+  }
+  const { book, chapter, structure, messages } = data;
+  // An older link with the id: go to the readable address (keeping ?p=, ?block= and ?cite=).
+  if (!isCanonicalParam(bookParam, book.slug)) redirect(`${bookPath(book)}/read/${number}${canonicalSuffix(search)}`);
 
   const progress = structure.progress;
   // The saved in-chapter position only counts for the frontier chapter AND the text revision it was recorded on.
@@ -69,6 +67,7 @@ async function ReadContent({ params, searchParams }: Pick<Props, "params" | "sea
       key={chapter.id}
       bookId={book.id}
       bookTitle={book.title}
+      bookSlug={book.slug}
       chapter={{ number: chapter.number, title: chapter.title, content: chapter.content, rev: chapter.content_rev }}
       chapters={structure.chapters.map((c) => ({ number: c.number, title: c.title }))}
       images={chapter.images}

@@ -22,11 +22,11 @@ export async function proxy(request: NextRequest) {
     },
   });
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  // Verified locally (no Auth-server round trip); this also refreshes an expired session cookie.
+  const { data } = await supabase.auth.getClaims();
+  const signedIn = !!data?.claims?.sub;
 
-  if (!user && request.nextUrl.pathname.startsWith("/library")) {
+  if (!signedIn && request.nextUrl.pathname.startsWith("/library")) {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
     url.search = "";

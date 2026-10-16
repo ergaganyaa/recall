@@ -7,7 +7,8 @@ import { requireUser } from "@/lib/auth";
 import { prepareChapter } from "@/lib/chapter-content";
 import { FEATURED_SERIES } from "@/lib/featured";
 import { ALLOWED_IMAGE_TYPES, EXTENSION_FOR, type ImageType } from "@/lib/image-sniff";
-import { storeChapterBody } from "@/lib/indexing";
+import { IDX_GENERATION, storeChapterBody } from "@/lib/indexing";
+import { timed } from "@/lib/timing";
 import { isUuid } from "@/lib/queries";
 import { createClient } from "@/lib/supabase/server";
 import type { ActionResult } from "@/lib/types";
@@ -102,7 +103,7 @@ export async function startVolumeImport(
   }
 
   const rows = data as { volume_id: string; chapter_id: string; chapter_number: number }[];
-  revalidatePath(`/library/${v.bookId}`);
+  revalidatePath("/library/[bookId]", "page"); // every address of the book (readable or id)
   return {
     ok: true,
     data: {
@@ -142,17 +143,19 @@ export async function saveImportedChapter(
   const body = prepared.value;
 
   const supabase = await createClient();
-  const { data: chapter } = await supabase
-    .from("chapters")
-    .select("id,number,book_id")
-    .eq("id", chapterId)
-    .eq("book_id", bookId)
-    .maybeSingle();
+  // Three independent reads in ONE round trip (they used to run one after another). The two that look
+  // at other tables are scoped by row level security, so for a chapter that is not theirs they find nothing.
+  const [{ data: chapter }, { data: old }, { data: highChunks }] = await timed("save chapter: reads", () =>
+    Promise.all([
+      supabase.from("chapters").select("id,number,book_id").eq("id", chapterId).eq("book_id", bookId).maybeSingle(),
+      supabase.from("book_images").select("id,storage_path").eq("chapter_id", chapterId),
+      supabase.from("chunks").select("idx").eq("chapter_id", chapterId).gte("idx", IDX_GENERATION).limit(1),
+    ]),
+  );
   if (!chapter) return { ok: false, error: "That chapter doesn't exist." };
 
   try {
     // Replace any illustrations from an earlier attempt/import of this chapter.
-    const { data: old } = await supabase.from("book_images").select("id,storage_path").eq("chapter_id", chapterId);
     const keep = new Set(images.map((i) => i.id));
     const stale = (old ?? []).filter((o) => !keep.has(o.id as string));
     if (stale.length) {
@@ -186,7 +189,7 @@ export async function saveImportedChapter(
       chunkRanges: body.chunkRanges,
       wordCount: body.wordCount,
       imageCount: body.imageIds.length,
-    });
+    }, { oldIsHigh: (highChunks?.length ?? 0) > 0 });
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Couldn't save this chapter." };
   }
@@ -231,7 +234,7 @@ export async function setBookCover(input: {
   }
   revalidatePath("/");
   revalidatePath("/library");
-  revalidatePath(`/library/${bookId}`);
+  revalidatePath("/library/[bookId]", "page"); // every address of the book (readable or id)
   return { ok: true, data: undefined };
 }
 
@@ -261,7 +264,7 @@ export async function deleteVolume(volumeId: string, bookId: string): Promise<Ac
   if (!isUuid(volumeId) || !isUuid(bookId)) return { ok: false, error: "Invalid request." };
   const supabase = await createClient();
   const res = await removeVolume(supabase, volumeId);
-  if (res.ok) revalidatePath(`/library/${bookId}`);
+  if (res.ok) revalidatePath("/library/[bookId]", "page"); // every address of the book (readable or id)
   return res;
 }
 
@@ -317,8 +320,8 @@ export async function setFeaturedBook(bookId: string): Promise<ActionResult> {
 const finalizeSchema = z.object({ bookId: uuid, volumeId: uuid, cover: imageSchema.omit({ alt: true }).nullable() });
 
 /**
- * The last step of a volume import. Marks the volume as imported, which is what lets it become
- * the book's automatic cover. Refuses unless EVERY chapter of the volume has text or
+ * The last step of a volume import. Marks the volume as imported, which is what lets its cover be
+ * used (as the library cover while the user reads it, and in the cover browser). Refuses unless EVERY chapter of the volume has text or
  * illustrations, so a partial import can never be marked complete.
  */
 export async function finalizeVolumeImport(input: z.input<typeof finalizeSchema>): Promise<ActionResult> {
@@ -369,11 +372,11 @@ export async function finalizeVolumeImport(input: z.input<typeof finalizeSchema>
 
   revalidatePath("/");
   revalidatePath("/library");
-  revalidatePath(`/library/${bookId}`);
+  revalidatePath("/library/[bookId]", "page"); // every address of the book (readable or id)
   return { ok: true, data: undefined };
 }
 
-/** Goes back to the automatic cover (the latest imported volume's) by dropping a manually chosen one. */
+/** Goes back to the automatic cover (the volume the user is reading) by dropping a manually chosen one. */
 export async function clearBookCover(bookId: string): Promise<ActionResult> {
   await requireUser();
   if (!isUuid(bookId)) return { ok: false, error: "Invalid book." };
@@ -389,6 +392,6 @@ export async function clearBookCover(bookId: string): Promise<ActionResult> {
   }
   revalidatePath("/");
   revalidatePath("/library");
-  revalidatePath(`/library/${bookId}`);
+  revalidatePath("/library/[bookId]", "page"); // every address of the book (readable or id)
   return { ok: true, data: undefined };
 }

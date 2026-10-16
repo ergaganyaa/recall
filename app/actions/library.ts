@@ -12,6 +12,7 @@ import { validateChapterText } from "@/lib/text-file";
 import { SAMPLE_BOOK } from "@/lib/sample-book";
 import { createClient } from "@/lib/supabase/server";
 import { BOOK_STATUSES, type ActionResult } from "@/lib/types";
+import { bookPath } from "@/lib/book-slug";
 
 export type CreateBookState = { error?: string };
 
@@ -71,7 +72,7 @@ export async function createBook(_prev: CreateBookState, formData: FormData): Pr
   }
 
   const supabase = await createClient();
-  const { data: book, error } = await supabase.from("books").insert(fields).select("id").single();
+  const { data: book, error } = await supabase.from("books").insert(fields).select("id,slug").single();
   if (error || !book) return { error: "Couldn't save the novel. Please try again." };
 
   try {
@@ -83,7 +84,7 @@ export async function createBook(_prev: CreateBookState, formData: FormData): Pr
   }
 
   revalidatePath("/library");
-  redirect(`/library/${book.id}`);
+  redirect(bookPath(book));
 }
 
 /** Adds the bundled original sample novel (mock content) to the library. */
@@ -100,7 +101,7 @@ export async function addSampleBook(): Promise<void> {
       status: "reading",
       is_sample: true,
     })
-    .select("id")
+    .select("id,slug")
     .single();
   if (error || !book) throw new Error("Couldn't add the sample novel.");
 
@@ -118,7 +119,7 @@ export async function addSampleBook(): Promise<void> {
   }
 
   revalidatePath("/library");
-  redirect(`/library/${book.id}`);
+  redirect(bookPath(book));
 }
 
 export async function deleteBook(bookId: string): Promise<ActionResult> {
@@ -205,7 +206,7 @@ export async function saveChapterText(input: {
       if (created) await supabase.from("chapters").delete().eq("id", chapter.id);
       throw e;
     }
-    revalidatePath(`/library/${bookId}`);
+    revalidatePath("/library/[bookId]", "page"); // every address of the book (readable or id)
     return { ok: true, data: { chapterNumber: chapter.number } };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Something went wrong." };
@@ -263,7 +264,7 @@ export async function addChaptersFromOutline(
     return { ok: false, error: e instanceof Error ? e.message : "Couldn't add the chapters." };
   }
 
-  revalidatePath(`/library/${bookId}`);
+  revalidatePath("/library/[bookId]", "page"); // every address of the book (readable or id)
   return {
     ok: true,
     data: { added: outline.chapterCount, volumes: outline.volumeCount, warnings: outline.warnings },

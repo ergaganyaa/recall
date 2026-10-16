@@ -65,7 +65,7 @@ export async function insertStructure(
 }
 
 /** Chunk idx values alternate between two ranges so old and new passages can coexist briefly. */
-const IDX_GENERATION = 1_000_000;
+export const IDX_GENERATION = 1_000_000;
 
 export type ChapterBody = {
   /** Display content (text lines and image markers, in reading order). */
@@ -89,15 +89,20 @@ export async function storeChapterBody(
   supabase: SupabaseClient,
   chapter: { id: string; book_id: string; number: number },
   body: ChapterBody,
+  /** Callers that already asked (in parallel with other reads) can pass the answer and save a round trip. */
+  known?: { oldIsHigh: boolean },
 ) {
-  const { data: existing, error: existingErr } = await supabase
-    .from("chunks")
-    .select("idx")
-    .eq("chapter_id", chapter.id)
-    .gte("idx", IDX_GENERATION)
-    .limit(1);
-  if (existingErr) throw new Error("Couldn't update the search index.");
-  const oldIsHigh = (existing?.length ?? 0) > 0;
+  let oldIsHigh = known?.oldIsHigh;
+  if (oldIsHigh === undefined) {
+    const { data: existing, error: existingErr } = await supabase
+      .from("chunks")
+      .select("idx")
+      .eq("chapter_id", chapter.id)
+      .gte("idx", IDX_GENERATION)
+      .limit(1);
+    if (existingErr) throw new Error("Couldn't update the search index.");
+    oldIsHigh = (existing?.length ?? 0) > 0;
+  }
   const base = oldIsHigh ? 0 : IDX_GENERATION;
 
   const rows = body.chunks.map((text, i) => ({

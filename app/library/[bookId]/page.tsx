@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { Suspense } from "react";
 import { MigrationNotice } from "@/components/migration-notice";
 import { schemaIsCurrent } from "@/lib/schema";
@@ -16,9 +16,12 @@ import { BookSkeleton } from "@/components/skeletons";
 import { readAssistantConfig } from "@/lib/assistant/config";
 import { comparePositions } from "@/lib/assistant/history";
 import { requireUser } from "@/lib/auth";
-import { resolveCover } from "@/lib/cover";
+import { resolveCover, volumeCards } from "@/lib/cover";
+import { imageUrl } from "@/lib/chapter-content";
+import { VolumeCoverBrowser } from "@/components/volume-cover-browser";
 import { summarizeProgress } from "@/lib/progress-display";
-import { getBook, getBookStructure, getChat } from "@/lib/queries";
+import { bookPath, isCanonicalParam } from "@/lib/book-slug";
+import { forgetBook, getBook, getBookStructure, getChat, resolveBookId } from "@/lib/queries";
 import { isSupabaseConfigured } from "@/lib/supabase/config";
 import { STATUS_LABELS } from "@/lib/types";
 
@@ -34,11 +37,16 @@ export default function BookPage({ params }: PageProps<"/library/[bookId]">) {
 }
 
 async function BookContent({ params }: { params: PageProps<"/library/[bookId]">["params"] }) {
-  const { bookId } = await params;
+  const { bookId: bookParam } = await params;
   await requireUser();
   if (!(await schemaIsCurrent())) return <MigrationNotice />;
-  const book = await getBook(bookId);
-  if (!book) notFound();
+  const bookId = await resolveBookId(bookParam);
+  const book = bookId ? await getBook(bookId) : null;
+  if (!book) {
+    await forgetBook(bookParam);
+    notFound();
+  }
+  if (!isCanonicalParam(bookParam, book.slug)) redirect(bookPath(book)); // an older link with the id: go to the readable address
 
   const [{ volumes, chapters, progress, bookmarks }, messages] = await Promise.all([
     getBookStructure(book.id),
@@ -49,7 +57,9 @@ async function BookContent({ params }: { params: PageProps<"/library/[bookId]">[
   const lastRead = Math.min(progress.last_read_chapter, total);
   // Only whether a key exists and the model name are passed to the browser; the key itself never is.
   const assistant = readAssistantConfig();
-  const cover = resolveCover(book, volumes);
+  // Default cover = the volume THIS user is reading (their own saved position); a manual cover still wins.
+  const cover = resolveCover(book, volumes, { chapters, currentChapter: progress.current_chapter });
+  const { cards, currentIndex } = volumeCards({ volumes, chapters, currentChapter: progress.current_chapter, lastRead });
   const summary = summarizeProgress({ chapters, lastRead, status: book.status });
   const percent = summary.percent;
   const lastReadChapter = chapters.find((c) => c.number === lastRead);
@@ -63,12 +73,18 @@ async function BookContent({ params }: { params: PageProps<"/library/[bookId]">[
       </Link>
 
       <div className="mt-6 grid gap-8 md:grid-cols-[14rem_1fr]">
-        <BookCover
-          title={book.title}
-          author={book.author}
-          coverUrl={cover.src}
-          className="mx-auto w-44 md:w-full"
-        />
+        {cards.length > 0 ? (
+          <VolumeCoverBrowser
+            // Remount when the volume being read changes, so the browser opens on it again.
+            key={cards[currentIndex]?.id}
+            bookTitle={book.title}
+            basePath={bookPath(book)}
+            cards={cards.map((c) => ({ ...c, coverSrc: c.coverImageId ? imageUrl(book.id, c.coverImageId) : null }))}
+            initialIndex={currentIndex}
+          />
+        ) : (
+          <BookCover title={book.title} author={book.author} coverUrl={cover.src} className="mx-auto w-44 md:w-full" />
+        )}
         <div>
           <p className="text-sm text-muted">
             <span className="rounded-full bg-accent-soft px-2.5 py-0.5 text-xs font-medium text-accent">
@@ -115,7 +131,7 @@ async function BookContent({ params }: { params: PageProps<"/library/[bookId]">[
             </div>
             {resumeTarget && (
               <Link
-                href={`/library/${book.id}/read/${resumeTarget.number}`}
+                href={`${bookPath(book)}/read/${resumeTarget.number}`}
                 className="mt-4 inline-block rounded-full bg-accent px-5 py-2.5 text-sm font-medium text-accent-foreground hover:opacity-90"
               >
                 {started
@@ -134,7 +150,7 @@ async function BookContent({ params }: { params: PageProps<"/library/[bookId]">[
               Volumes &amp; chapters
             </h2>
             <Link
-              href={`/library/${book.id}/import`}
+              href={`${bookPath(book)}/import`}
               className="rounded-full bg-accent px-4 py-2 text-sm font-medium text-accent-foreground hover:opacity-90"
             >
               + Import a volume
@@ -142,6 +158,7 @@ async function BookContent({ params }: { params: PageProps<"/library/[bookId]">[
           </div>
           <ChapterList
             bookId={book.id}
+            basePath={bookPath(book)}
             volumes={volumes}
             chapters={chapters}
             lastRead={lastRead}
@@ -162,7 +179,7 @@ async function BookContent({ params }: { params: PageProps<"/library/[bookId]">[
             modelLabel={assistant.model}
           />
           <ChapterTools bookId={book.id} chapters={chapters} />
-          <BookmarksList bookId={book.id} bookmarks={bookmarks} />
+          <BookmarksList basePath={bookPath(book)} bookmarks={bookmarks} />
         </aside>
       </div>
     </div>
