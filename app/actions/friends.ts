@@ -124,7 +124,8 @@ export async function addFriendBook(username: string, bookId: string): Promise<A
   if (error) {
     // Only the database's error code and message are logged (they describe the failing statement, never book text).
     console.error("[friends] copy_friend_book failed:", error.code, error.message);
-    return { ok: false, error: missing(error.code) ? MIGRATE_SHARE : `Couldn't add that novel (database error ${error.code ?? "unknown"}). Please try again.` };
+    const why = String(error.message ?? "").replace(/\s+/g, " ").slice(0, 200); // describes the failing statement, not book text
+    return { ok: false, error: missing(error.code) ? MIGRATE_SHARE : `Couldn't add that novel (database error ${error.code ?? "unknown"}: ${why}). Please try again.` };
   }
   const parsed = copyShape.safeParse(data);
   if (!parsed.success) {
