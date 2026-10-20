@@ -121,9 +121,16 @@ export async function addFriendBook(username: string, bookId: string): Promise<A
 
   const supabase = await createClient();
   const { data, error } = await supabase.rpc("copy_friend_book", { p_owner_username: name.username, p_book_id: bookId });
-  if (error) return { ok: false, error: missing(error.code) ? MIGRATE_SHARE : "Couldn't add that novel. Please try again." };
+  if (error) {
+    // Only the database's error code and message are logged (they describe the failing statement, never book text).
+    console.error("[friends] copy_friend_book failed:", error.code, error.message);
+    return { ok: false, error: missing(error.code) ? MIGRATE_SHARE : `Couldn't add that novel (database error ${error.code ?? "unknown"}). Please try again.` };
+  }
   const parsed = copyShape.safeParse(data);
-  if (!parsed.success) return { ok: false, error: "Couldn't add that novel. Please try again." };
+  if (!parsed.success) {
+    console.error("[friends] copy_friend_book returned an unexpected result");
+    return { ok: false, error: "Couldn't add that novel (unexpected answer from the database). Please try again." };
+  }
 
   const result = parsed.data;
   if ("error" in result) {
