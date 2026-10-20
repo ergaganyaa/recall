@@ -60,7 +60,29 @@ export type AssistantErrorCode =
   | "unavailable"
   | "model_unavailable"
   | "bad_request"
-  | "not_found";
+  | "not_found"
+  | "selection_ahead"
+  | "selection_far"
+  | "selection_stale"
+  | "selection_invalid";
+
+/**
+ * The paragraphs the reader selected, as the SERVER read them from the chapter (never the browser's copy).
+ * It is context for one question, not a grant of access: retrieval, history and recaps still stop at the boundary.
+ */
+export type SelectionText = {
+  chapter: number;
+  chapter_title: string;
+  volume_number: number | null;
+  block_first: number;
+  block_last: number;
+  /** the selected paragraphs, joined by newlines */
+  text: string;
+  /** the part the reader highlighted, only if it really occurs in `text`; else null */
+  quote: string | null;
+  /** true when the passage is in the chapter being read (so its end counts toward the position a message is stored under) */
+  isCurrentChapter: boolean;
+};
 
 export type AnswerOutcome =
   | { kind: "answer"; text: string; citations: Citation[]; boundary: number; partialBlock: number }

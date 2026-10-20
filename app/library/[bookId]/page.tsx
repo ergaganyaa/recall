@@ -18,6 +18,7 @@ import { comparePositions } from "@/lib/assistant/history";
 import { requireUser } from "@/lib/auth";
 import { resolveCover, volumeCards } from "@/lib/cover";
 import { imageUrl } from "@/lib/chapter-content";
+import { RecapCard } from "@/components/recap-card";
 import { VolumeCoverBrowser } from "@/components/volume-cover-browser";
 import { summarizeProgress } from "@/lib/progress-display";
 import { bookPath, isCanonicalParam } from "@/lib/book-slug";
@@ -139,6 +140,7 @@ async function BookContent({ params }: { params: PageProps<"/library/[bookId]">[
                   : "Start reading"}
               </Link>
             )}
+            <RecapCard bookId={book.id} configured={!!assistant.apiKey} started={started} />
           </div>
         </div>
       </div>

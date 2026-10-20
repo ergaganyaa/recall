@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { mapLimit } from "@/lib/concurrency";
 import { IMAGE_CONCURRENCY, CHAPTER_CONCURRENCY, runVolumeImport, type RunnerDeps, type UploadedImage } from "@/lib/import-runner";
@@ -287,5 +289,71 @@ describe("schema check is not repeated on every page", () => {
     expect(first).toBe(4);
     expect(await schemaIsCurrent()).toBe(true);
     expect(calls.length).toBe(first); // cached for the life of the server process
+  });
+});
+
+describe("pictures start loading early and in the right order", () => {
+  it("leadingImageIds returns the first pictures at or after a block, in reading order", async () => {
+    const { leadingImageIds } = await import("@/lib/chapter-content");
+    const A = "0000000a-0000-4000-8000-00000000000a";
+    const B = "0000000b-0000-4000-8000-00000000000b";
+    const C = "0000000c-0000-4000-8000-00000000000c";
+    const content = ["one", `[[image:${A}]]`, "", "two", `[[image:${B}]]`, "three", `[[image:${C}]]`].join("\n");
+    // blocks: 0 one, 1 A, 2 two, 3 B, 4 three, 5 C
+    expect(leadingImageIds(content, 0, 2)).toEqual([A, B]);
+    expect(leadingImageIds(content, 2, 2)).toEqual([B, C]);
+    expect(leadingImageIds(content, 4, 5)).toEqual([C]);
+    expect(leadingImageIds(content, 99, 2)).toEqual([]);
+    expect(leadingImageIds(content, -5, 1)).toEqual([A]);
+    expect(leadingImageIds("", 0, 2)).toEqual([]);
+  });
+});
+
+describe("import reads a PDF once", () => {
+  it("the importer parses first and only inspects (a second full pass) for a scanned PDF", () => {
+    const source = readFileSync(path.resolve(import.meta.dirname, "../components/volume-importer.tsx"), "utf8");
+    const parseAt = source.indexOf('await parsePdfFile(bytes, f.name, "text")');
+    const inspectAt = source.indexOf("await inspectPdf(bytes");
+    expect(parseAt).toBeGreaterThan(0);
+    expect(inspectAt).toBeGreaterThan(parseAt); // inspection comes after, inside the needs_ocr branch
+    expect(source.slice(parseAt, inspectAt)).toContain('e.code !== "needs_ocr"');
+  });
+});
+
+describe("import progress reports illustrations", () => {
+  it("includes how many illustrations have been uploaded", async () => {
+    const labels: string[] = [];
+    const bytes = new Uint8Array([1]);
+    const chapters = [0, 1].map((c) => ({
+      title: `C${c}`,
+      blocks: [
+        { type: "text" as const, text: "text" },
+        { type: "image" as const, ref: `i${c}`, alt: null },
+      ],
+    }));
+    const images = new Map(chapters.map((_, c) => [`i${c}`, { bytes, mime: "image/png" as const, width: 1, height: 1 }]));
+    let n = 0;
+    await runVolumeImport({
+      bookId: BOOK,
+      meta: { number: 1, arc: "", arcOrder: 1, title: "", language: "", replace: false },
+      chapters: chapters as never,
+      images: images as never,
+      cover: null,
+      setAsBookCover: false,
+      onProgress: (_d, _t, label) => labels.push(label),
+      deps: {
+        start: async () => ({ ok: true, data: { userId: USER, volumeId: "v", chapters: [{ id: "c0", number: 1 }, { id: "c1", number: 2 }] } }),
+        uploadImage: async (_u, img) => {
+          const id = `3000000${++n}-0000-4000-8000-000000000000`;
+          return { id, path: `${USER}/b/${id}.png`, mime: img.mime, width: 1, height: 1, bytes: 1 };
+        },
+        removeObjects: async () => undefined,
+        saveChapter: async (i) => ({ ok: true, data: { wordCount: 1, imageCount: i.images.length } }),
+        finalize: async () => ({ ok: true, data: undefined }),
+        discard: async () => ({ ok: true, data: undefined }),
+        setBookCover: async () => ({ ok: true, data: undefined }),
+      },
+    });
+    expect(labels.some((l) => /Saved 2 of 2 chapters · 2 of 2 illustrations uploaded/.test(l))).toBe(true);
   });
 });

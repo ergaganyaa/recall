@@ -59,6 +59,7 @@ export function ChapterImage({
       width={width ?? undefined}
       height={height ?? undefined}
       loading={eager ? "eager" : "lazy"}
+      fetchPriority={eager ? "high" : undefined}
       decoding="async"
       onError={() => setFailed(true)}
       className="mx-auto block h-auto w-auto max-h-[90vh] max-w-full rounded-lg object-contain"

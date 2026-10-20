@@ -48,6 +48,7 @@ export async function bootDb() {
   await db.exec(migration("0006_reading_position.sql"));
   await db.exec(migration("0007_scroll_boundary.sql"));
   await db.exec(migration("0008_book_slugs.sql"));
+  await db.exec(migration("0009_recap_and_selection.sql"));
 
   await db.exec(`
     grant usage on schema public to anon, authenticated;

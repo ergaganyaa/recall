@@ -5,10 +5,11 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { addBookmark, markChapterRead, recordReadingCheckpoint, saveProgress } from "@/app/actions/reading";
 import type { Citation } from "@/lib/assistant/types";
-import { imageUrl, toBlocks } from "@/lib/chapter-content";
+import { imageUrl, leadingImageIds, toBlocks } from "@/lib/chapter-content";
 import { createProgressSaver, type ProgressSaver } from "@/lib/progress-saver";
 import type { ChatMessage } from "@/lib/types";
-import { AssistantChat, type ChatContext } from "./assistant-chat";
+import { selectionRange, tidyQuote } from "@/lib/selection";
+import { AssistantChat, type ChatContext, type ChatSelection } from "./assistant-chat";
 import { ChapterImage } from "./chapter-image";
 import { ChapterPicker } from "./chapter-picker";
 import { useScrollBoundary } from "./use-block-tracking";
@@ -120,6 +121,43 @@ export function Reader(props: {
   const [toast, setToast] = useState<string | null>(null);
   const [highlight, setHighlight] = useState<number | null>(focusBlock);
   const [canGoBack, setCanGoBack] = useState(false);
+  // "Ask about this passage": the text the reader has highlighted right now (just paragraph numbers and a short quote)
+  // and, once they chose to ask, the passage the chat will send along. The server re-reads the paragraphs itself.
+  const [picked, setPicked] = useState<{ from: number; to: number; quote: string; clipped: boolean } | null>(null);
+  const [askSelection, setAskSelection] = useState<ChatSelection | null>(null);
+
+  // The chapter body is rebuilt only when the text, pictures or the highlighted paragraph change, not on every
+  // unrelated state change (chat panel, toast, settings, "Opening…"): a long chapter is hundreds of paragraphs.
+  const eagerImages = useMemo(
+    () => new Set(leadingImageIds(chapter.content ?? "", focusBlock ?? props.resumeBlock ?? Math.floor(initialPct * blocks.length), 2)),
+    [chapter.content, focusBlock, props.resumeBlock, initialPct, blocks.length],
+  );
+  const body = useMemo(
+    () =>
+      blocks.map((b, i) => {
+        const litClass = highlight === i ? "rounded-md bg-accent-soft outline outline-2 outline-offset-4 outline-accent transition" : "";
+        if (b.type === "text") {
+          return (
+            <p key={`b${i}`} data-block={i} id={`block-${i}`} className={`scroll-mt-24 ${litClass}`}>
+              {b.text}
+            </p>
+          );
+        }
+        const img = images[b.id];
+        return (
+          <figure key={`b${i}`} data-block={i} id={`block-${i}`} className={`my-[1.5em] scroll-mt-24 ${litClass}`}>
+            <ChapterImage
+              src={img ? imageUrl(bookId, img.id, img.ext) : null}
+              alt={img?.alt ?? null}
+              width={img?.width ?? null}
+              height={img?.height ?? null}
+              eager={eagerImages.has(b.id)}
+            />
+          </figure>
+        );
+      }),
+    [blocks, images, highlight, bookId, eagerImages],
+  );
   const finished = useRef(false);
   const returnY = useRef(0);
   // Saves the resume position after a pause AND whenever the reader leaves (see flushProgress).
@@ -288,6 +326,53 @@ export function Reader(props: {
       saver.current = null;
     };
   }, [bookId, chapter.number, initialPct, visit]);
+
+  // Watch the text selection. Only a highlight inside the chapter text counts; highlighting in the chat box does not.
+  useEffect(() => {
+    if (!chapter.content) return;
+    const blockOf = (node: Node | null): number | null => {
+      const el = node instanceof Element ? node : (node?.parentElement ?? null);
+      const holder = el?.closest<HTMLElement>("[data-block]");
+      if (!holder || !holder.closest('[data-testid="chapter-body"]')) return null;
+      const n = Number(holder.dataset.block);
+      return Number.isInteger(n) ? n : null;
+    };
+    let raf = 0;
+    let forget = 0;
+    // Phones clear the highlight the moment you tap anything, including our button, BEFORE the tap is delivered.
+    // So when the highlight disappears we keep the last one for a moment instead of dropping it at once.
+    const scheduleForget = () => {
+      if (!forget) forget = window.setTimeout(() => setPicked(null), 3000);
+    };
+    const read = () => {
+      raf = 0;
+      const sel = window.getSelection();
+      if (!sel || sel.isCollapsed || sel.rangeCount === 0) return scheduleForget();
+      const range = selectionRange(blockOf(sel.anchorNode), blockOf(sel.focusNode));
+      const quote = tidyQuote(sel.toString());
+      if (!range || quote.length < 2) return scheduleForget();
+      window.clearTimeout(forget);
+      forget = 0;
+      setPicked({ ...range, quote });
+    };
+    const onChange = () => {
+      if (!raf) raf = requestAnimationFrame(read);
+    };
+    document.addEventListener("selectionchange", onChange);
+    return () => {
+      document.removeEventListener("selectionchange", onChange);
+      if (raf) cancelAnimationFrame(raf);
+      window.clearTimeout(forget);
+    };
+  }, [chapter.content]);
+
+  function askAboutPicked() {
+    if (!picked) return;
+    if (!chatOpen) captureAnchor(); // opening the chat must not move the page
+    setAskSelection({ chapter: chapter.number, from: picked.from, to: picked.to, rev: chapter.rev, quote: picked.quote, clipped: picked.clipped });
+    setChatOpen(true);
+    setPicked(null);
+  }
 
   // Keyboard navigation between chapters; Escape closes the chat.
   useEffect(() => {
@@ -496,32 +581,7 @@ export function Reader(props: {
 
           {chapter.content ? (
             <div className="mt-8 space-y-[1em]" data-testid="chapter-body">
-              {blocks.map((b, i) => {
-                const lit = highlight === i;
-                const litClass = lit ? "rounded-md bg-accent-soft outline outline-2 outline-offset-4 outline-accent transition" : "";
-                const el =
-                  b.type === "text" ? (
-                    <p key={`b${i}`} data-block={i} id={`block-${i}`} className={`scroll-mt-24 ${litClass}`}>
-                      {b.text}
-                    </p>
-                  ) : (
-                    (() => {
-                      const img = images[b.id];
-                      return (
-                        <figure key={`b${i}`} data-block={i} id={`block-${i}`} className={`my-[1.5em] scroll-mt-24 ${litClass}`}>
-                          <ChapterImage
-                            src={img ? imageUrl(bookId, img.id, img.ext) : null}
-                            alt={img?.alt ?? null}
-                            width={img?.width ?? null}
-                            height={img?.height ?? null}
-                            eager={i < 3}
-                          />
-                        </figure>
-                      );
-                    })()
-                  );
-                return el;
-              })}
+              {body}
             </div>
           ) : (
             <div className="mt-8 rounded-2xl border border-dashed border-border bg-surface p-6 text-center" style={{ fontSize: 15, fontFamily: "var(--font-geist-sans), system-ui, sans-serif" }}>
@@ -620,9 +680,28 @@ export function Reader(props: {
           onJump={jumpTo}
           beforeAsk={beforeAsk}
           onClose={toggleChat}
+          selection={askSelection}
+          onClearSelection={() => setAskSelection(null)}
         />
       </aside>
 
+      {picked && !(chatOpen && isMobile) && (
+        <button
+          type="button"
+          // Act on PRESS (before a phone clears the highlight); keep the highlight while the button is pressed.
+          // The click handler covers the keyboard (Enter / Space), which has no press event.
+          onPointerDown={(e) => {
+            e.preventDefault();
+            askAboutPicked();
+          }}
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={askAboutPicked}
+          data-testid="ask-about-passage"
+          className="fixed bottom-16 left-1/2 z-30 -translate-x-1/2 rounded-full bg-accent px-4 py-2.5 text-sm font-medium text-accent-foreground shadow-lg hover:opacity-90 focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-accent"
+        >
+          ✦ Ask AI about this passage
+        </button>
+      )}
       {canGoBack && (
         <button
           type="button"

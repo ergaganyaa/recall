@@ -2,9 +2,21 @@
 
 import Link from "next/link";
 import { useEffect, useRef, useState, useTransition, type ReactNode } from "react";
-import { askAssistant, clearChat } from "@/app/actions/assistant";
+import { askAssistant, clearChat, recapStory } from "@/app/actions/assistant";
 import type { Citation } from "@/lib/assistant/types";
 import type { ChatMessage } from "@/lib/types";
+
+/** A passage the reader selected: only its paragraph numbers and a short quote. The server re-reads the text itself. */
+export type ChatSelection = { chapter: number; from: number; to: number; rev: number; quote: string; clipped: boolean };
+
+/** Quick questions offered once a passage is selected. */
+export const SELECTION_SUGGESTIONS = [
+  "What does this mean?",
+  "Why did this character react this way?",
+  "Who is this character?",
+  "Have I encountered this character before?",
+  "Explain the context of this passage.",
+];
 
 /** Where the reader is, shown at the top of the in-reader chat so follow-up questions need no repeated context. */
 export type ChatContext = {
@@ -20,7 +32,7 @@ const chip =
   "inline-flex max-w-full items-center gap-1.5 rounded-full border border-border bg-background px-2.5 py-1 text-xs text-foreground transition hover:border-accent hover:text-accent focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-accent";
 
 /** Sources under an answer: the chapters it cites first, then any others that were only consulted. */
-function Sources({
+export function Sources({
   sources,
   currentChapter,
   onJump,
@@ -97,6 +109,8 @@ export function AssistantChat({
   beforeAsk,
   headerAction,
   onClose,
+  selection = null,
+  onClearSelection,
 }: {
   suggestions?: string[];
   bookId: string;
@@ -117,6 +131,9 @@ export function AssistantChat({
   beforeAsk?: () => Promise<void>;
   headerAction?: ReactNode;
   onClose?: () => void;
+  /** the passage the next question is about (from the reader's text selection) */
+  selection?: ChatSelection | null;
+  onClearSelection?: () => void;
 }) {
   const [messages, setMessages] = useState<ChatMessage[]>(initialMessages);
   const [input, setInput] = useState("");
@@ -127,6 +144,13 @@ export function AssistantChat({
   useEffect(() => {
     scroller.current?.scrollTo({ top: scroller.current.scrollHeight, behavior: "smooth" });
   }, [messages, pending]);
+
+  // A passage was just attached: on a wide screen put the cursor in the question box (on a phone this would open the
+  // keyboard over the suggested questions, so there you pick one or tap the box yourself).
+  useEffect(() => {
+    if (!selection || !window.matchMedia("(min-width: 1024px)").matches) return;
+    document.getElementById(variant === "panel" ? "reader-chat-input" : "chat-input")?.focus({ preventScroll: true });
+  }, [selection, variant]);
 
   function send(text: string) {
     const q = text.trim();
@@ -143,15 +167,42 @@ export function AssistantChat({
           setInput(q);
           return;
         }
-        const res = await askAssistant(bookId, q);
-        if (res.ok) setMessages((m) => [...m, ...res.data]);
-        else {
+        const res = await askAssistant(
+          bookId,
+          q,
+          selection ? { chapter: selection.chapter, from: selection.from, to: selection.to, rev: selection.rev, quote: selection.quote } : undefined,
+        );
+        if (res.ok) {
+          setMessages((m) => [...m, ...res.data]);
+          if (selection) onClearSelection?.(); // a follow-up is a new question; the chat history carries the context
+        } else {
           setError({ text: res.error, code: res.code });
           setInput(q);
         }
       } catch {
         setError({ text: "Couldn't reach the server. Please try again." });
         setInput(q);
+      }
+    });
+  }
+
+  /** "Remind me what happened": a recap of the story just before your place (the server decides what that is). */
+  function recap() {
+    if (pending) return;
+    setError(null);
+    startTransition(async () => {
+      try {
+        try {
+          await beforeAsk?.();
+        } catch (e) {
+          setError({ text: e instanceof Error ? e.message : "Couldn't save your reading position.", code: "position" });
+          return;
+        }
+        const res = await recapStory(bookId);
+        if (res.ok) setMessages((m) => [...m, ...res.data]);
+        else setError({ text: res.error, code: res.code });
+      } catch {
+        setError({ text: "Couldn't reach the server. Please try again." });
       }
     });
   }
@@ -209,7 +260,7 @@ export function AssistantChat({
               {context.volume ? `${context.volume} · ` : ""}Ch. {context.chapter} — {context.chapterTitle}
             </p>
             <p className="mt-1 text-muted">
-              The assistant only uses <strong className="text-foreground">{context.readTo}</strong>. Nothing later is ever sent.
+              The assistant only uses <strong className="text-foreground">{context.readTo}</strong>. Nothing later is ever sent{selection ? ", apart from the passage you selected (for this question only)" : ""}.
             </p>
           </div>
         ) : (
@@ -224,6 +275,16 @@ export function AssistantChat({
             )}
           </p>
         )}
+        <button
+          type="button"
+          onClick={recap}
+          disabled={pending || blocked}
+          data-testid="recap-button"
+          title="A short reminder of the story just before your place. It only uses what you have read."
+          className="mt-2 mr-2 inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-1.5 text-xs font-medium text-foreground transition hover:border-accent hover:text-accent disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-accent"
+        >
+          <span aria-hidden>↺</span> Remind me what happened
+        </button>
         {headerAction}
         <p className="mt-2 text-[0.7rem] leading-snug text-muted">
           <span className="mr-1.5 inline-block rounded-full bg-accent-soft px-2 py-0.5 font-medium text-accent">AI · {modelLabel}</span>
@@ -281,7 +342,34 @@ export function AssistantChat({
             {error.text}
           </p>
         )}
-        {messages.length === 0 && suggestions.length > 0 && (
+        {selection && (
+          <div className="mb-2 rounded-xl border border-border bg-background px-3 py-2 text-xs" data-testid="selection-chip">
+            <div className="flex items-start justify-between gap-2">
+              <p className="min-w-0 text-muted">
+                <span className="font-medium text-foreground">About this passage:</span>{" "}
+                <q className="break-words">{selection.quote.length > 160 ? `${selection.quote.slice(0, 159)}…` : selection.quote}</q>
+              </p>
+              <button type="button" onClick={onClearSelection} aria-label="Remove the selected passage" data-testid="selection-clear" className="shrink-0 text-muted hover:text-foreground">
+                ✕
+              </button>
+            </div>
+            {selection.clipped && <p className="mt-1 text-muted">Only the first three paragraphs of your selection are used.</p>}
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {SELECTION_SUGGESTIONS.map((q) => (
+                <button
+                  key={q}
+                  type="button"
+                  disabled={pending || blocked}
+                  onClick={() => send(q)}
+                  className="rounded-full border border-border px-2.5 py-1 hover:bg-accent-soft disabled:opacity-50"
+                >
+                  {q}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+        {messages.length === 0 && !selection && suggestions.length > 0 && (
           <div className="mb-3 flex flex-wrap gap-2">
             {suggestions.map((s) => (
               <button

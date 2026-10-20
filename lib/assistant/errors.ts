@@ -31,6 +31,14 @@ export function friendlyMessage(code: AssistantErrorCode, retryAfterSec?: number
       return "The AI service rejected the request. Please try a shorter or simpler question.";
     case "not_found":
       return "Book not found.";
+    case "selection_ahead":
+      return "That passage is in a chapter you haven't reached yet, so I can't use it.";
+    case "selection_far":
+      return "That passage is further ahead than what's on your screen. Scroll to it and select it again.";
+    case "selection_stale":
+      return "This chapter's text has changed. Reload the page and select the passage again.";
+    case "selection_invalid":
+      return "Select one to three paragraphs of the chapter text, then ask again.";
   }
 }
 

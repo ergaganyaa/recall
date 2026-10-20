@@ -210,11 +210,13 @@ export async function runVolumeImport(input: RunInput): Promise<RunResult> {
   try {
     let done = 0;
     const slots: ChapterOutcome[] = new Array(chapters.length);
+    const totalImages = chapters.reduce((n, c) => n + c.blocks.filter((b) => b.type === "image" && input.images.has(b.ref)).length, 0);
+    const pictures = () => (totalImages ? ` · ${state.stored.size} of ${totalImages} illustrations uploaded` : "");
     await mapLimit(chapters, CHAPTER_CONCURRENCY, async (chapter, i) => {
       if (input.signal?.aborted) return;
-      input.onProgress?.(done, chapters.length, `Chapter ${i + 1} of ${chapters.length}: ${chapter.title}`);
+      input.onProgress?.(done, chapters.length, `Saving chapters${pictures()}`);
       slots[i] = await importChapter(input, state, i);
-      input.onProgress?.(++done, chapters.length, `Saved ${done} of ${chapters.length} chapters`);
+      input.onProgress?.(++done, chapters.length, `Saved ${done} of ${chapters.length} chapters${pictures()}`);
     });
     if (input.signal?.aborted) return cancel(input, state);
     state.outcomes.push(...slots);

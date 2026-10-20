@@ -14,6 +14,7 @@ vi.mock("@/app/actions/reading", () => ({
 vi.mock("@/app/actions/assistant", () => ({
   askAssistant: async () => ({ ok: false, error: "unused" }),
   clearChat: async () => ({ ok: true, data: undefined }),
+  recapStory: async () => ({ ok: false, error: "unused" }),
 }));
 
 import { ChapterImage } from "@/components/chapter-image";
@@ -309,5 +310,22 @@ describe("reader: performance-related behaviour", () => {
     expect(source).toContain('"Opening…"');
     expect(source).toContain("setNavigating(false)");
     expect(source).toContain("if (boundary >= chapter.number) return;"); // re-reading a finished chapter waits for no network call
+  });
+});
+
+describe("reader: pictures near the reading position load first", () => {
+  it("the first two pictures from where you resume are eager and high priority; earlier ones stay lazy", () => {
+    const html = render({ initialPct: 0.4 }); // block 3 of 8: the picture at block 4 is next, the one at block 2 is behind
+    const img = (n: number) => html.match(new RegExp(`<img[^>]*image/${IMG(n)}[^>]*>`))![0];
+    expect(img(2)).toContain('fetchPriority="high"');
+    expect(img(2)).toContain('loading="eager"');
+    expect(img(1)).toContain('loading="lazy"');
+    expect(img(1)).not.toContain("fetchPriority");
+  });
+
+  it("the chapter body is memoised, so unrelated state changes do not rebuild hundreds of paragraphs", () => {
+    const source = readFileSync(path.resolve(import.meta.dirname, "../components/reader.tsx"), "utf8");
+    expect(source).toMatch(/const body = useMemo\(/);
+    expect(source).toContain("{body}");
   });
 });

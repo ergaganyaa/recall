@@ -182,12 +182,19 @@ export function VolumeImporter({
         const f = pdfs[0];
         if (f.size > PDF_MAX_BYTES) throw new Error(`“${f.name}” is ${(f.size / 1e6).toFixed(0)} MB; the limit is ${PDF_MAX_BYTES / 1e6} MB.`);
         const bytes = new Uint8Array(await f.arrayBuffer());
-        const info = await inspectPdf(bytes, await pdfOptions());
-        if (info.scanned) {
+        // One pass, not two: parsePdf already scans every page and stops early with "needs_ocr" for a scanned PDF,
+        // so the separate inspection pass (a full extra scan, about 40% of the time on a text PDF) only runs
+        // for the rare scanned file, to describe it.
+        const tPdf = performance.now();
+        try {
+          await parsePdfFile(bytes, f.name, "text");
+          timing("import: read + parse PDF", tPdf);
+        } catch (e) {
+          if (!(e instanceof PdfError) || e.code !== "needs_ocr") throw e;
+          setBusy("Checking the scanned pages…");
+          const info = await inspectPdf(bytes, await pdfOptions());
           setScanned({ bytes, fileName: f.name, info });
-          return;
         }
-        await parsePdfFile(bytes, f.name, "text");
         return;
       }
 

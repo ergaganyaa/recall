@@ -331,13 +331,12 @@ export async function finalizeVolumeImport(input: z.input<typeof finalizeSchema>
   const { bookId, volumeId, cover } = parsed.data;
   const supabase = await createClient();
 
-  const { data: volume } = await supabase.from("volumes").select("id").eq("id", volumeId).eq("book_id", bookId).maybeSingle();
+  // Two independent reads, one round trip.
+  const [{ data: volume }, { data: chapters, error }] = await Promise.all([
+    supabase.from("volumes").select("id").eq("id", volumeId).eq("book_id", bookId).maybeSingle(),
+    supabase.from("chapters").select("word_count,image_count").eq("volume_id", volumeId),
+  ]);
   if (!volume) return { ok: false, error: "That volume doesn't exist." };
-
-  const { data: chapters, error } = await supabase
-    .from("chapters")
-    .select("word_count,image_count")
-    .eq("volume_id", volumeId);
   if (error || !chapters || chapters.length === 0) return { ok: false, error: "Couldn't check the volume's chapters." };
   const empty = chapters.filter((c) => c.word_count === 0 && c.image_count === 0).length;
   if (empty > 0) {

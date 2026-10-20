@@ -1,4 +1,5 @@
 import { notFound, redirect } from "next/navigation";
+import { preload } from "react-dom";
 import { Suspense } from "react";
 import { MigrationNotice } from "@/components/migration-notice";
 import { Reader } from "@/components/reader";
@@ -9,6 +10,7 @@ import { comparePositions } from "@/lib/assistant/history";
 import { formatVolume } from "@/lib/assistant/prompt";
 import { bookPath, canonicalSuffix, isCanonicalParam } from "@/lib/book-slug";
 import { forgetBook } from "@/lib/queries";
+import { imageUrl, leadingImageIds, toBlocks } from "@/lib/chapter-content";
 import { loadReaderData } from "@/lib/reader-data";
 import { isSupabaseConfigured } from "@/lib/supabase/config";
 
@@ -60,6 +62,16 @@ async function ReadContent({ params, searchParams }: Pick<Props, "params" | "sea
   const fromLink = typeof p === "string" ? Number(p) : NaN;
   const saved = structure.progress.current_chapter === number ? structure.progress.scroll_pct : 0;
   const initialPct = Number.isFinite(fromLink) ? Math.min(1, Math.max(0, fromLink)) : saved;
+
+  // Start fetching the first pictures NOW (a hint in the page head), instead of after the page's code has run and the
+  // text has rendered. The URLs are exactly the ones the reader renders, so the browser reuses these downloads.
+  if (chapter.content) {
+    const from = focus ?? resumeBlock ?? Math.floor(initialPct * toBlocks(chapter.content).length);
+    for (const id of leadingImageIds(chapter.content, from, 2)) {
+      const img = chapter.images[id];
+      if (img) preload(imageUrl(book.id, id, img.ext), { as: "image", fetchPriority: "high" });
+    }
+  }
 
   return (
     <Reader

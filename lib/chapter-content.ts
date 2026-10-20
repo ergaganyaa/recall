@@ -40,6 +40,20 @@ export function toBlocks(content: string): ContentBlock[] {
   return blocks;
 }
 
+/**
+ * The first `count` illustrations at or after block `fromBlock` (reading order). The reader page uses it to start
+ * downloading the pictures the reader will see first, before the page's code has even run.
+ */
+export function leadingImageIds(content: string, fromBlock: number, count: number): string[] {
+  const out: string[] = [];
+  const blocks = toBlocks(content);
+  for (let i = Math.max(0, fromBlock); i < blocks.length && out.length < count; i++) {
+    const b = blocks[i];
+    if (b.type === "image") out.push(b.id);
+  }
+  return out;
+}
+
 /** Content with all image markers removed: the only form that is indexed or counted. */
 export function stripImageMarkers(content: string): string {
   return content
