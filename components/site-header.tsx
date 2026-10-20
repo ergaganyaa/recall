@@ -6,8 +6,10 @@ import { useState, type ReactNode } from "react";
 import { ThemeToggle } from "./theme-toggle";
 
 const links = [
-  { href: "/", label: "Home" },
-  { href: "/library", label: "Library" },
+  { href: "/", label: "Home", also: [] as string[] },
+  // The library lives on your profile; book pages still count as "My library".
+  { href: "/profile", label: "My library", also: ["/library"] },
+  { href: "/friends", label: "Friends", also: [] as string[] },
 ];
 
 export function SiteHeader({ account }: { account: ReactNode }) {
@@ -17,8 +19,8 @@ export function SiteHeader({ account }: { account: ReactNode }) {
   // The reader is a focused full-screen view with its own toolbar.
   if (/^\/library\/[^/]+\/read\//.test(pathname)) return null;
 
-  const isActive = (href: string) =>
-    href === "/" ? pathname === "/" : pathname.startsWith(href);
+  const isActive = (l: (typeof links)[number]) =>
+    l.href === "/" ? pathname === "/" : [l.href, ...l.also].some((p) => pathname.startsWith(p));
 
   return (
     <header className="sticky top-0 z-30 border-b border-border bg-background/80 backdrop-blur">
@@ -38,9 +40,9 @@ export function SiteHeader({ account }: { account: ReactNode }) {
             <Link
               key={l.href}
               href={l.href}
-              aria-current={isActive(l.href) ? "page" : undefined}
+              aria-current={isActive(l) ? "page" : undefined}
               className={`rounded-full px-4 py-2 text-sm font-medium transition-colors ${
-                isActive(l.href) ? "bg-accent-soft text-accent" : "text-muted hover:text-foreground"
+                isActive(l) ? "bg-accent-soft text-accent" : "text-muted hover:text-foreground"
               }`}
             >
               {l.label}
@@ -73,7 +75,7 @@ export function SiteHeader({ account }: { account: ReactNode }) {
               href={l.href}
               onClick={() => setOpen(false)}
               className={`block rounded-lg px-3 py-3 text-sm font-medium ${
-                isActive(l.href) ? "bg-accent-soft text-accent" : "text-muted"
+                isActive(l) ? "bg-accent-soft text-accent" : "text-muted"
               }`}
             >
               {l.label}

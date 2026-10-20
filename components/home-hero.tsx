@@ -53,7 +53,7 @@ export function LandingHero({ signedIn }: { signedIn: boolean }) {
                   Feature {FEATURED_SERIES.title}
                 </button>
               </form>
-              <Link href="/library" className="rounded-full border border-border px-6 py-3 text-sm font-medium transition hover:bg-accent-soft">
+              <Link href="/profile#library" className="rounded-full border border-border px-6 py-3 text-sm font-medium transition hover:bg-accent-soft">
                 Open my library
               </Link>
             </>
@@ -62,7 +62,7 @@ export function LandingHero({ signedIn }: { signedIn: boolean }) {
               <Link href="/signup" className="rounded-full bg-accent px-6 py-3 text-sm font-medium text-accent-foreground transition hover:opacity-90">
                 Get started
               </Link>
-              <Link href="/library" className="rounded-full border border-border px-6 py-3 text-sm font-medium transition hover:bg-accent-soft">
+              <Link href="/profile#library" className="rounded-full border border-border px-6 py-3 text-sm font-medium transition hover:bg-accent-soft">
                 Open my library
               </Link>
             </>

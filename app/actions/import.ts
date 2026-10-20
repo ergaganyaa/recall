@@ -234,6 +234,7 @@ export async function setBookCover(input: {
   }
   revalidatePath("/");
   revalidatePath("/library");
+  revalidatePath("/profile");
   revalidatePath("/library/[bookId]", "page"); // every address of the book (readable or id)
   return { ok: true, data: undefined };
 }
@@ -302,6 +303,7 @@ export async function setupFeaturedSeries(): Promise<ActionResult<{ bookId: stri
   if (featErr) return { ok: false, error: "Couldn't feature the series." };
   revalidatePath("/");
   revalidatePath("/library");
+  revalidatePath("/profile");
   return { ok: true, data: { bookId } };
 }
 
@@ -313,6 +315,7 @@ export async function setFeaturedBook(bookId: string): Promise<ActionResult> {
   if (error) return { ok: false, error: "Couldn't feature this book." };
   revalidatePath("/");
   revalidatePath("/library");
+  revalidatePath("/profile");
   return { ok: true, data: undefined };
 }
 
@@ -371,6 +374,7 @@ export async function finalizeVolumeImport(input: z.input<typeof finalizeSchema>
 
   revalidatePath("/");
   revalidatePath("/library");
+  revalidatePath("/profile");
   revalidatePath("/library/[bookId]", "page"); // every address of the book (readable or id)
   return { ok: true, data: undefined };
 }
@@ -391,6 +395,7 @@ export async function clearBookCover(bookId: string): Promise<ActionResult> {
   }
   revalidatePath("/");
   revalidatePath("/library");
+  revalidatePath("/profile");
   revalidatePath("/library/[bookId]", "page"); // every address of the book (readable or id)
   return { ok: true, data: undefined };
 }

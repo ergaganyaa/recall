@@ -63,16 +63,26 @@ export function defaultVolumeCoverId(volumes: CoverVolume[], place?: ReadingPlac
 
 export type CoverSource = "manual" | "volume" | "linked" | "none";
 
+/** Which cover applies, as an image id (for the caller to turn into a URL) or a linked URL. Same rules for everyone. */
+export function chooseCover(
+  book: CoverBook,
+  volumes: CoverVolume[],
+  place?: ReadingPlace,
+): { imageId: string | null; url: string | null; source: CoverSource } {
+  if (book.cover_image_id) return { imageId: book.cover_image_id, url: null, source: "manual" };
+  const fromVolume = defaultVolumeCoverId(volumes, place);
+  if (fromVolume) return { imageId: fromVolume, url: null, source: "volume" };
+  if (book.cover_url) return { imageId: null, url: book.cover_url, source: "linked" };
+  return { imageId: null, url: null, source: "none" };
+}
+
 export function resolveCover(
   book: CoverBook,
   volumes: CoverVolume[],
   place?: ReadingPlace,
 ): { src: string | null; source: CoverSource } {
-  if (book.cover_image_id) return { src: imageUrl(book.id, book.cover_image_id), source: "manual" };
-  const fromVolume = defaultVolumeCoverId(volumes, place);
-  if (fromVolume) return { src: imageUrl(book.id, fromVolume), source: "volume" };
-  if (book.cover_url) return { src: book.cover_url, source: "linked" };
-  return { src: null, source: "none" };
+  const c = chooseCover(book, volumes, place);
+  return { src: c.imageId ? imageUrl(book.id, c.imageId) : c.url, source: c.source };
 }
 
 // ------------------------------------------------------------------ browsing volume covers

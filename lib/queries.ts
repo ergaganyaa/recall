@@ -5,6 +5,7 @@ import { getUser } from "./auth";
 import { parseBookParam } from "./book-slug";
 import { EXTENSION_FOR } from "./image-sniff";
 import { createClient } from "./supabase/server";
+import type { Profile } from "./profile";
 import type {
   Book,
   Bookmark,
@@ -206,3 +207,16 @@ export async function getChat(bookId: string): Promise<ChatMessage[]> {
   if (error) throw new Error("Couldn't load the conversation.");
   return (data ?? []) as ChatMessage[];
 }
+
+/** The signed-in user's profile, or null (no profile yet, or the profiles migration has not been run). Once per request. */
+export const getProfile = cache(async (): Promise<Profile | null> => {
+  const user = await getUser();
+  if (!user) return null;
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("profiles")
+    .select("id,username,display_name,bio,avatar_path,share_library,created_at")
+    .eq("id", user.id)
+    .maybeSingle<Profile>();
+  return error ? null : data;
+});

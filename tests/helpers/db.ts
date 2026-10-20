@@ -21,7 +21,7 @@ export async function bootDb() {
     create role anon nologin;
     create role authenticated nologin;
     create schema auth;
-    create table auth.users (id uuid primary key);
+    create table auth.users (id uuid primary key, email text, raw_user_meta_data jsonb default '{}'::jsonb);
     create function auth.uid() returns uuid language sql stable
       as $$ select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid $$;
     grant usage on schema auth to anon, authenticated;
@@ -49,6 +49,8 @@ export async function bootDb() {
   await db.exec(migration("0007_scroll_boundary.sql"));
   await db.exec(migration("0008_book_slugs.sql"));
   await db.exec(migration("0009_recap_and_selection.sql"));
+  await db.exec(migration("0010_profiles.sql"));
+  await db.exec(migration("0011_friends.sql"));
 
   await db.exec(`
     grant usage on schema public to anon, authenticated;

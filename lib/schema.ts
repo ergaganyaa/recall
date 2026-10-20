@@ -22,6 +22,8 @@ export const schemaIsCurrent = cache(async (): Promise<boolean> => {
     supabase.from("chapters").select("image_count").limit(1),
     supabase.from("volumes").select("arc,arc_order,language").limit(1),
     supabase.from("book_images").select("id").limit(1),
+    supabase.from("profiles").select("id,username,avatar_path,share_library").limit(1),
+    supabase.from("friendships").select("id").limit(1),
   ]);
   const missing = probes.find((p) => isSchemaErrorCode(p.error?.code));
   if (missing) console.error("[recall] Database schema is out of date:", missing.error?.message);

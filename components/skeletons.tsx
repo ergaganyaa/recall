@@ -36,3 +36,17 @@ export function ReaderSkeleton() {
     </div>
   );
 }
+
+export function ProfileSkeleton() {
+  return (
+    <div className="mx-auto max-w-6xl px-4 py-10 sm:px-6 sm:py-14" aria-busy="true">
+      <div className="skeleton h-40 w-full rounded-2xl" />
+      <div className="mt-6 grid grid-cols-3 gap-3">
+        <div className="skeleton h-20 rounded-2xl" />
+        <div className="skeleton h-20 rounded-2xl" />
+        <div className="skeleton h-20 rounded-2xl" />
+      </div>
+      <div className="skeleton mt-10 h-64 w-full rounded-2xl" />
+    </div>
+  );
+}

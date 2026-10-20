@@ -286,7 +286,7 @@ describe("schema check is not repeated on every page", () => {
     calls.length = 0;
     expect(await schemaIsCurrent()).toBe(true);
     const first = calls.length;
-    expect(first).toBe(4);
+    expect(first).toBe(6); // books, chapters, volumes, images, profiles and friendships
     expect(await schemaIsCurrent()).toBe(true);
     expect(calls.length).toBe(first); // cached for the life of the server process
   });

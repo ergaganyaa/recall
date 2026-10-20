@@ -1,7 +1,9 @@
 import Link from "next/link";
 import { signOut } from "@/app/actions/auth";
 import { getUser } from "@/lib/auth";
+import { getProfile } from "@/lib/queries";
 import { isSupabaseConfigured } from "@/lib/supabase/config";
+import { Avatar } from "./avatar";
 
 /** Reads the session, so it must be rendered inside <Suspense>. */
 export async function AccountMenu() {
@@ -24,13 +26,22 @@ export async function AccountMenu() {
     );
   }
 
+  const profile = await getProfile();
+  const name = profile ? `@${profile.username}` : (user.email ?? "Your profile");
+
   return (
-    <div className="flex items-center gap-3">
-      <span className="hidden max-w-40 truncate text-sm text-muted md:inline">{user.email}</span>
+    <div className="flex items-center gap-2">
+      <Link
+        href="/profile"
+        aria-label={`Your profile: ${name}`}
+        data-testid="account-link"
+        className="flex items-center gap-2 rounded-full py-1 pl-1 pr-3 text-sm font-medium transition hover:bg-accent-soft focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-accent"
+      >
+        <Avatar profile={profile} size="sm" />
+        <span className="hidden max-w-32 truncate text-muted md:inline">{name}</span>
+      </Link>
       <form action={signOut}>
-        <button className="rounded-full border border-border px-4 py-2 text-sm font-medium hover:bg-accent-soft">
-          Sign out
-        </button>
+        <button className="rounded-full border border-border px-4 py-2 text-sm font-medium hover:bg-accent-soft">Sign out</button>
       </form>
     </div>
   );

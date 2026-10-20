@@ -11,7 +11,7 @@ export default function GlobalError({ error, reset }: { error: Error & { digest?
         <button onClick={reset} className="rounded-full bg-accent px-6 py-3 text-sm font-medium text-accent-foreground">
           Try again
         </button>
-        <Link href="/library" className="rounded-full border border-border px-6 py-3 text-sm font-medium">
+        <Link href="/profile#library" className="rounded-full border border-border px-6 py-3 text-sm font-medium">
           Back to library
         </Link>
       </div>

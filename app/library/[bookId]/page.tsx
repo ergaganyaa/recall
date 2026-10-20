@@ -69,7 +69,7 @@ async function BookContent({ params }: { params: PageProps<"/library/[bookId]">[
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6 sm:py-12">
-      <Link href="/library" className="text-sm text-muted hover:text-foreground">
+      <Link href="/profile#library" className="text-sm text-muted hover:text-foreground">
         ← Back to library
       </Link>
 

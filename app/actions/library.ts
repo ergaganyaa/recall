@@ -84,6 +84,7 @@ export async function createBook(_prev: CreateBookState, formData: FormData): Pr
   }
 
   revalidatePath("/library");
+  revalidatePath("/profile");
   redirect(bookPath(book));
 }
 
@@ -119,6 +120,7 @@ export async function addSampleBook(): Promise<void> {
   }
 
   revalidatePath("/library");
+  revalidatePath("/profile");
   redirect(bookPath(book));
 }
 
@@ -129,6 +131,7 @@ export async function deleteBook(bookId: string): Promise<ActionResult> {
   const { error } = await supabase.from("books").delete().eq("id", bookId);
   if (error) return { ok: false, error: "Couldn't remove this book." };
   revalidatePath("/library");
+  revalidatePath("/profile");
   return { ok: true, data: undefined };
 }
 
@@ -140,6 +143,7 @@ export async function updateBookStatus(bookId: string, status: string): Promise<
   const { error } = await supabase.from("books").update({ status: parsed.data }).eq("id", bookId);
   if (error) return { ok: false, error: "Couldn't update the status." };
   revalidatePath("/library");
+  revalidatePath("/profile");
   return { ok: true, data: undefined };
 }
 

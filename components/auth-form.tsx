@@ -20,16 +20,53 @@ export function AuthForm({ mode, next }: { mode: "login" | "signup"; next?: stri
 
       <form action={action} className="mt-6 space-y-4">
         {next && <input type="hidden" name="next" value={next} />}
-        <label className="block text-sm font-medium">
-          Email
-          <input
-            name="email"
-            type="email"
-            required
-            autoComplete="email"
-            className="mt-1 w-full rounded-xl border border-border bg-surface px-4 py-2.5 outline-none focus:border-accent"
-          />
-        </label>
+        {isLogin ? (
+          <label className="block text-sm font-medium">
+            Username or email
+            <input
+              name="identifier"
+              type="text"
+              required
+              maxLength={254}
+              autoComplete="username"
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
+              className="mt-1 w-full rounded-xl border border-border bg-surface px-4 py-2.5 outline-none focus:border-accent"
+            />
+          </label>
+        ) : (
+          <>
+            <label className="block text-sm font-medium">
+              Username
+              <input
+                name="username"
+                type="text"
+                required
+                minLength={3}
+                maxLength={20}
+                pattern="[A-Za-z0-9_]{3,20}"
+                title="3 to 20 letters, numbers or underscores"
+                autoComplete="username"
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
+                className="mt-1 w-full rounded-xl border border-border bg-surface px-4 py-2.5 outline-none focus:border-accent"
+              />
+              <span className="mt-1 block text-xs font-normal text-muted">3–20 letters, numbers or underscores. You can sign in with it.</span>
+            </label>
+            <label className="block text-sm font-medium">
+              Email
+              <input
+                name="email"
+                type="email"
+                required
+                autoComplete="email"
+                className="mt-1 w-full rounded-xl border border-border bg-surface px-4 py-2.5 outline-none focus:border-accent"
+              />
+            </label>
+          </>
+        )}
         <label className="block text-sm font-medium">
           Password
           <input

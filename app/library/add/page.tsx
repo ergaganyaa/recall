@@ -12,7 +12,7 @@ export default function AddNovelPage() {
   if (!isSupabaseConfigured) return <SetupNotice />;
   return (
     <div className="mx-auto max-w-2xl px-4 py-10 sm:px-6 sm:py-14">
-      <Link href="/library" className="text-sm text-muted hover:text-foreground">
+      <Link href="/profile#library" className="text-sm text-muted hover:text-foreground">
         ← Back to library
       </Link>
       <h1 className="mt-4 text-3xl font-bold tracking-tight">Add a novel</h1>
