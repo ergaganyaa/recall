@@ -20,7 +20,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export const isUuid = (v: string) => UUID.test(v);
 
 export const BOOK_COLS =
-  "id,slug,title,author,description,cover_url,source_url,status,is_sample,is_featured,language,cover_image_id,created_at";
+  "id,slug,title,author,description,cover_url,source_url,status,is_sample,is_featured,language,cover_image_id,shared_with_friends,created_at";
 const VOLUME_COLS = "id,number,title,arc,arc_order,language,imported_at,cover_image_id";
 const CHAPTER_COLS = "id,number,title,volume_id,source_url,word_count,image_count";
 

@@ -126,7 +126,7 @@ describe("a friend's library on the server", () => {
       { id: "v1", number: 1, arc_order: 1, imported_at: "2026-01-01T00:00:00Z", cover_image_id: "c1" },
       { id: "v2", number: 2, arc_order: 1, imported_at: "2026-01-02T00:00:00Z", cover_image_id: "c2" },
     ],
-    current_chapter: 5, finished: 4, total: 10, reading_volume_id: "v2", ...over,
+    current_chapter: 5, finished: 4, total: 10, reading_volume_id: "v2", shareable: false, my_slug: null, ...over,
   });
 
   it("covers follow the FRIEND's reading position, and a pinned cover wins", async () => {
@@ -238,7 +238,7 @@ describe("friends screens", () => {
   });
 
   it("a friend's book card is read-only: cover from the friend's cover route, progress, and no link into the book", () => {
-    const html = renderToStaticMarkup(<FriendBookCard owner="mira_reads" book={{ id: "b", title: "Their Novel", author: "Au Thor", status: "completed", coverImageId: IMG, coverUrl: null, finished: 5, total: 10 }} />);
+    const html = renderToStaticMarkup(<FriendBookCard owner="mira_reads" book={{ id: "b", title: "Their Novel", author: "Au Thor", status: "completed", coverImageId: IMG, coverUrl: null, finished: 5, total: 10, shareable: false, mySlug: null }} />);
     expect(html).toContain(`src="/friends/mira_reads/cover/${IMG}"`);
     expect(html).toContain("Their Novel");
     expect(html).toContain("by Au Thor");
@@ -246,7 +246,7 @@ describe("friends screens", () => {
     expect(html).toContain('aria-valuenow="50"');
     expect(html).not.toContain("<a ");
     expect(html).not.toContain("/library/");
-    expect(renderToStaticMarkup(<FriendBookCard owner="m" book={{ id: "b", title: "No Cover", author: null, status: "reading", coverImageId: null, coverUrl: null, finished: 0, total: 0 }} />)).not.toContain("<img");
+    expect(renderToStaticMarkup(<FriendBookCard owner="m" book={{ id: "b", title: "No Cover", author: null, status: "reading", coverImageId: null, coverUrl: null, finished: 0, total: 0, shareable: false, mySlug: null }} />)).not.toContain("<img");
   });
 
   it("Avatar asks for a friend's picture with ?u= only when it is given an owner", () => {

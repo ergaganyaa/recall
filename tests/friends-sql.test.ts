@@ -180,7 +180,7 @@ describe("what a friend can see", () => {
     expect((book.volumes as Row[])[0]).toMatchObject({ cover_image_id: aliceCover });
     const everything = JSON.stringify(l);
     expect(everything).not.toMatch(/zx|private|bookmark|source_url|content|note/i); // no chapter text/titles, notes, chat, links
-    expect(Object.keys(book).sort()).toEqual(["author", "cover_image_id", "cover_url", "current_chapter", "finished", "id", "reading_volume_id", "status", "title", "total", "volumes"]);
+    expect(Object.keys(book).sort()).toEqual(["author", "cover_image_id", "cover_url", "current_chapter", "finished", "id", "my_slug", "reading_volume_id", "shareable", "status", "title", "total", "volumes"]);
   });
 
   it("friends cannot read the rows behind it directly (books, chapters, bookmarks, chat, progress)", async () => {

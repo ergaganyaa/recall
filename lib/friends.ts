@@ -72,6 +72,8 @@ const bookShape = z.object({
   finished: z.number(),
   total: z.number(),
   reading_volume_id: z.string().nullable(),
+  shareable: z.boolean(),
+  my_slug: z.string().nullable(),
 });
 const libraryShape = z.object({ shared: z.boolean(), books: z.array(bookShape) });
 
@@ -85,6 +87,10 @@ export type FriendBook = {
   coverUrl: string | null;
   finished: number;
   total: number;
+  /** the owner allows friends to add a copy */
+  shareable: boolean;
+  /** the slug of YOUR copy, if you already added this novel */
+  mySlug: string | null;
 };
 
 /** null = not a friend; shared:false = they turned sharing off. Covers follow THEIR reading position. */
@@ -100,7 +106,7 @@ export async function getFriendLibrary(username: string): Promise<{ shared: bool
       const volumes: CoverVolume[] = b.volumes;
       const place = { chapters: b.current_chapter !== null ? [{ number: b.current_chapter, volume_id: b.reading_volume_id }] : [], currentChapter: b.current_chapter };
       const cover = chooseCover({ id: b.id, cover_image_id: b.cover_image_id, cover_url: b.cover_url }, volumes, place);
-      return { id: b.id, title: b.title, author: b.author, status: b.status, coverImageId: cover.imageId, coverUrl: cover.url, finished: b.finished, total: b.total };
+      return { id: b.id, title: b.title, author: b.author, status: b.status, coverImageId: cover.imageId, coverUrl: cover.url, finished: b.finished, total: b.total, shareable: b.shareable, mySlug: b.my_slug };
     }),
   };
 }

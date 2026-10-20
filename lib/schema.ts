@@ -18,7 +18,7 @@ export const schemaIsCurrent = cache(async (): Promise<boolean> => {
   if (verified) return true;
   const supabase = await createClient();
   const probes = await Promise.all([
-    supabase.from("books").select("is_featured,language,cover_image_id,slug").limit(1),
+    supabase.from("books").select("is_featured,language,cover_image_id,slug,shared_with_friends").limit(1),
     supabase.from("chapters").select("image_count").limit(1),
     supabase.from("volumes").select("arc,arc_order,language").limit(1),
     supabase.from("book_images").select("id").limit(1),

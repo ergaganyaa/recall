@@ -19,6 +19,7 @@ import { requireUser } from "@/lib/auth";
 import { resolveCover, volumeCards } from "@/lib/cover";
 import { imageUrl } from "@/lib/chapter-content";
 import { RecapCard } from "@/components/recap-card";
+import { ShareBookToggle } from "@/components/share-book-toggle";
 import { VolumeCoverBrowser } from "@/components/volume-cover-browser";
 import { summarizeProgress } from "@/lib/progress-display";
 import { bookPath, isCanonicalParam } from "@/lib/book-slug";
@@ -99,6 +100,7 @@ async function BookContent({ params }: { params: PageProps<"/library/[bookId]">[
           <h1 className="mt-2 text-3xl font-bold tracking-tight sm:text-4xl">{book.title}</h1>
           {book.author && <p className="mt-1 text-muted">by {book.author}</p>}
           <p className="mt-2"><CoverControl bookId={book.id} source={cover.source} /></p>
+          <ShareBookToggle bookId={book.id} shared={book.shared_with_friends} />
           {book.description && (
             <p className="mt-4 max-w-2xl whitespace-pre-line leading-relaxed">{book.description}</p>
           )}

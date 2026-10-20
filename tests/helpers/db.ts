@@ -51,6 +51,7 @@ export async function bootDb() {
   await db.exec(migration("0009_recap_and_selection.sql"));
   await db.exec(migration("0010_profiles.sql"));
   await db.exec(migration("0011_friends.sql"));
+  await db.exec(migration("0012_share_books.sql"));
 
   await db.exec(`
     grant usage on schema public to anon, authenticated;

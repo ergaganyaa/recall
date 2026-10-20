@@ -29,6 +29,8 @@ export type Book = {
   is_featured: boolean;
   language: string | null;
   cover_image_id: string | null;
+  /** friends may add a copy of this novel (off by default) */
+  shared_with_friends: boolean;
   created_at: string;
 };
 

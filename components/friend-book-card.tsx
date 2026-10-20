@@ -1,11 +1,12 @@
 import type { FriendBook } from "@/lib/friends";
 import { STATUS_LABELS, type BookStatus } from "@/lib/types";
+import { AddFriendBook } from "./add-friend-book";
 import { BookCover } from "./book-cover";
 import { ProgressBar } from "./progress-bar";
 
 /**
- * One of a friend's books, read-only: cover, title, author, status and how far they are. It is not a link: a friend's
- * books are theirs, and nothing inside them (chapters, notes, text) is shared.
+ * One of a friend's books: cover, title, author, status and how far they are. It is not a link into their book; the only
+ * action is adding your own copy, and only when the friend chose to share this novel.
  */
 export function FriendBookCard({ book, owner }: { book: FriendBook; owner: string }) {
   const percent = book.total > 0 ? Math.min(100, Math.round((book.finished / book.total) * 100)) : 0;
@@ -22,6 +23,7 @@ export function FriendBookCard({ book, owner }: { book: FriendBook; owner: strin
           {book.total > 0 && ` · ${book.finished} / ${book.total} chapters`}
         </p>
         <ProgressBar percent={percent} label={`${book.title}: ${percent}% read`} className="mt-2" />
+        <AddFriendBook username={owner} bookId={book.id} shareable={book.shareable} mySlug={book.mySlug} />
       </div>
     </article>
   );
